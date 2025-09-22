@@ -1,8 +1,26 @@
 {
+  "scopedRegistries": [
+    {
+      "name": "NPM",
+      "url": "https://registry.npmjs.com",
+      "scopes": [
+        "com.github.asus4"
+      ]
+    }
+  ],
   "dependencies": {
-    "com.unity.ide.rider": "3.0.31",
-    "com.unity.render-pipelines.high-definition": "14.0.11",
+    "com.github.asus4.onnxruntime": "0.4.2",
+    "com.github.asus4.onnxruntime-extensions": "0.4.2",
+    "com.github.asus4.onnxruntime-genai": "0.4.2",
+    "com.github.asus4.onnxruntime.linux-x64-gpu": "https://github.com/asus4/onnxruntime-unity.git?path=com.github.asus4.onnxruntime.linux-x64-gpu",
+    "com.github.asus4.onnxruntime.unity": "0.4.2",
+    "com.github.asus4.onnxruntime.win-x64-gpu": "https://github.com/asus4/onnxruntime-unity.git?path=com.github.asus4.onnxruntime.win-x64-gpu",
+    "com.unity.ide.rider": "3.0.36",
+    "com.unity.multiplayer.center": "1.0.0",
+    "com.unity.nuget.newtonsoft-json": "3.2.1",
+    "com.unity.render-pipelines.high-definition": "17.0.4",
     "org.nesnausk.gaussian-splatting": "file:../../../package",
+    "com.unity.modules.accessibility": "1.0.0",
     "com.unity.modules.ai": "1.0.0",
     "com.unity.modules.androidjni": "1.0.0",
     "com.unity.modules.animation": "1.0.0",
