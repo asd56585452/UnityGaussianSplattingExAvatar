@@ -10,7 +10,7 @@ MonoImporter:
   - m_ShaderDebugBoxes: {fileID: 4800000, guid: 4006f2680fd7c8b4cbcb881454c782be, type: 3}
   - m_CSSplatUtilities: {fileID: 7200000, guid: ec84f78b836bd4f96a105d6b804f08bd, type: 3}
   - m_CSFfxSort: {fileID: 7200000, guid: dec36776b6c843544a1f6f9b436a4474, type: 3}
-  executionOrder: 0
+  executionOrder: 100
   icon: {instanceID: 0}
   userData: 
   assetBundleName: 

@@ -386,7 +386,7 @@ namespace GaussianSplatting.Runtime
             var texFormat = GaussianSplatAsset.ColorFormatToGraphics(asset.colorFormat);
             var tex = new Texture2D(texWidth, texHeight, texFormat, TextureCreationFlags.DontInitializePixels | TextureCreationFlags.IgnoreMipmapLimit | TextureCreationFlags.DontUploadUponCreate) { name = "GaussianColorData" };
             tex.SetPixelData(asset.colorData.GetData<byte>(), 0);
-            tex.Apply(false, true);
+            tex.Apply(false, false);
             m_GpuColorData = tex;
             if (asset.chunkData != null && asset.chunkData.dataSize != 0)
             {
@@ -1082,5 +1082,72 @@ namespace GaussianSplatting.Runtime
         }
 
         public GraphicsBuffer GpuEditDeleted => m_GpuEditDeleted;
+
+        public void UpdateSplatPositions(float[] positions)
+        {
+            if (m_GpuPosData != null && positions.Length * sizeof(float) <= m_GpuPosData.count * m_GpuPosData.stride)
+            {
+                m_GpuPosData.SetData(positions);
+                Debug.Log($"Pos {positions.Length} * {sizeof(float)} <= {m_GpuPosData.count} * {m_GpuPosData.stride}");
+            }
+            else
+            {
+                if (m_GpuPosData == null)
+                {
+                    Debug.LogError("更新 splat 位置失敗。緩衝區為空。");
+                }
+                else if(positions.Length * sizeof(float) > m_GpuPosData.count * m_GpuPosData.stride)
+                {
+                    Debug.LogError($"更新 splat 位置失敗。位置數據大小不匹配。{positions.Length} * {sizeof(float)} <= {m_GpuPosData.count} * {m_GpuPosData.stride}");
+                }
+            }
+        }
+
+        public int ColorTextureWidth => m_GpuColorData ? m_GpuColorData.width : 0;
+        public int ColorTextureHeight => m_GpuColorData ? m_GpuColorData.height : 0;
+
+        // *** 修正: 接收 float[] 而不是 byte[] ***
+        public void UpdateSplatColors(float[] colorData)
+        {
+            if (m_GpuColorData == null)
+            {
+                Debug.LogError("更新 splat 顏色失敗。顏色紋理 (m_GpuColorData) 為空。");
+                return;
+            }
+
+            Texture2D colorTex = m_GpuColorData as Texture2D;
+            if (colorTex == null)
+            {
+                Debug.LogWarning("m_GpuColorData 不是 Texture2D，無法使用此方法直接更新顏色。");
+                return;
+            }
+
+            // 每個像素由 4 個浮點數 (R,G,B,A) 組成
+            int expectedFloatCount = colorTex.width * colorTex.height * 4;
+            if (colorData.Length != expectedFloatCount)
+            {
+                Debug.LogError($"更新 splat 顏色失敗。顏色數據大小 ({colorData.Length} floats) 與期望的紋理大小 ({expectedFloatCount} floats) 不匹配。");
+                return;
+            }
+
+            // 使用 SetPixelData<float> 來更新浮點數紋理
+            colorTex.SetPixelData(colorData, 0);
+            colorTex.Apply(false, false); // 上傳到 GPU
+        }
+
+        public GraphicsBuffer GetGpuOtherData() => m_GpuOtherData;
+        public int m_GpuOtherData_length => m_GpuOtherData.count * m_GpuOtherData.stride;
+
+        public void UpdateGpuOtherData(byte[] otherData)
+        {
+            if (m_GpuOtherData != null && otherData.Length == m_GpuOtherData.count * m_GpuOtherData.stride)
+            {
+                m_GpuOtherData.SetData(otherData);
+            }
+            else
+            {
+                Debug.LogError("更新 'Other' 數據失敗。緩衝區為空或數據大小不匹配。");
+            }
+        }
     }
 }

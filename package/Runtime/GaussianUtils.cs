@@ -103,5 +103,20 @@ namespace GaussianSplatting.Runtime
             t = (t ^ (t >> 2)) & 0x0f0f;        // ----EFGH----ABCD
             return new uint2(t & 0xF, t >> 8);  // --------EFGHABCD
         }
+
+        public static int SplatIndexToTextureIndex(uint idx)
+        {
+            uint2 xy = DecodeMorton2D_16x16(idx);
+            uint width = GaussianSplatAsset.kTextureWidth / 16;
+            idx >>= 8;
+            uint x = (idx % width) * 16 + xy.x;
+            uint y = (idx / width) * 16 + xy.y;
+            return (int)(y * GaussianSplatAsset.kTextureWidth + x);
+        }
+
+        public static uint EncodeQuatToNorm10(float4 v) // 32 bits: 10.10.10.2
+        {
+            return (uint) (v.x * 1023.5f) | ((uint) (v.y * 1023.5f) << 10) | ((uint) (v.z * 1023.5f) << 20) | ((uint) (v.w * 3.5f) << 30);
+        }
     }
 }
