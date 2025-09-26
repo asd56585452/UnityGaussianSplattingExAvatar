@@ -1,0 +1,15 @@
+#pragma kernel CSMain
+
+StructuredBuffer<float> _Source;
+RWStructuredBuffer<float> _Destination;
+uint _ElementCount; // 新增一個變數來儲存元素總數
+
+[numthreads(64, 1, 1)]
+void CSMain(uint3 id : SV_DispatchThreadID)
+{
+    // 邊界檢查：只有當前執行緒的 ID 小於元素總數時，才進行複製
+    if (id.x < _ElementCount)
+    {
+        _Destination[id.x] = _Source[id.x];
+    }
+}

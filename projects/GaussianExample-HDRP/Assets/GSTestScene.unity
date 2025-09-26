@@ -732,6 +732,7 @@ MonoBehaviour:
   motionFolderName: smplx_params_smoothed
   frameIndex: 0
   gaussianSplatRenderer: {fileID: 1609192434}
+  tensorCopyShader: {fileID: 7200000, guid: 619c078d4ffbe0047b73b20bfc8628ee, type: 3}
 --- !u!1 &1809080840
 GameObject:
   m_ObjectHideFlags: 0

@@ -253,7 +253,7 @@ namespace GaussianSplatting.Runtime
         int m_SplatCount; // initially same as asset splat count, but editing can change this
         GraphicsBuffer m_GpuSortDistances;
         internal GraphicsBuffer m_GpuSortKeys;
-        public GraphicsBuffer m_GpuPosData;
+        GraphicsBuffer m_GpuPosData;
         GraphicsBuffer m_GpuOtherData;
         GraphicsBuffer m_GpuSHData;
         Texture m_GpuColorData;
@@ -1082,6 +1082,8 @@ namespace GaussianSplatting.Runtime
         }
 
         public GraphicsBuffer GpuEditDeleted => m_GpuEditDeleted;
+
+        public GraphicsBuffer GetGpuPosData() => m_GpuPosData;
 
         public void UpdateSplatPositions(float[] positions)
         {
