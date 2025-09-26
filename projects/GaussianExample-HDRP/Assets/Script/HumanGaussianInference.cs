@@ -17,6 +17,11 @@ public class HumanGaussianInference : MonoBehaviour
     public ModelAsset modelAsset;
     Model runtimeModel;
     Worker worker;
+    CommandBuffer cb;
+
+    public ComputeShader tensorCopyShader;
+    private int m_TensorCopyKernel;
+    public bool cpuCopy;
 
     [Header("Animation Data")]
     public string motionFolderName = "smplx_params_smoothed";
@@ -73,7 +78,19 @@ public class HumanGaussianInference : MonoBehaviour
         }
 
         worker = new Worker(runtimeModel, BackendType.GPUCompute);
+        LoadInputsForFrame(0,true);
+        cb = new CommandBuffer();
+        cb.ScheduleWorker(worker);
         Debug.Log("ONNX Model loaded successfully.");
+
+        if (tensorCopyShader != null)
+        {
+            m_TensorCopyKernel = tensorCopyShader.FindKernel("CSMain");
+        }
+        else
+        {
+            Debug.LogError("TensorCopyShader 未在 InferenceRenderManager 中指定！");
+        }
 
     }
 
@@ -86,20 +103,40 @@ public class HumanGaussianInference : MonoBehaviour
     void Update()
     {
         // --- 從 JSON 檔案載入輸入資料 ---
-        LoadInputsForFrame(frameIndex);
+        LoadInputsForFrame(frameIndex,false);
 
         // --- 執行推論 ---
-        worker.Schedule();
+        //worker.Schedule();
+        Graphics.ExecuteCommandBuffer(cb);
 
         // --- 更新公開的 Tensor 屬性 ---
         PosOutputTensor = worker.PeekOutput("mean_3d_refined") as Tensor<float>;
+        if (cpuCopy)
+        {
+            var dataSpan = PosOutputTensor.DownloadToArray();
+            gaussianSplatRenderer.UpdateSplatPositions(dataSpan);
+        }
+        else
+        {
+            var computeTensorData = ComputeTensorData.Pin(PosOutputTensor);
+            var sourceBuffer = computeTensorData.buffer;
+            uint logicalElementCount = (uint)PosOutputTensor.shape.length;
+            var destinationBuffer = gaussianSplatRenderer.GetGpuPosData();
+            if (logicalElementCount > destinationBuffer.count)
+            {
+                Debug.LogError($"目標 GraphicsBuffer 的大小不足以容納 Tensor 資料！ Tensor 需要 {logicalElementCount} 個元素, 但 Buffer 只有 {destinationBuffer.count} 個。");
+            }
+            tensorCopyShader.SetBuffer(m_TensorCopyKernel, "_Source", sourceBuffer);
+            tensorCopyShader.SetBuffer(m_TensorCopyKernel, "_Destination", destinationBuffer);
+            tensorCopyShader.SetInt("_ElementCount", (int)logicalElementCount);
 
-        // 注意：我們不再直接處理輸出了。
-        // ProcessOutputs(); // 這行現在由 GaussianSplatRenderSystem 透過 CommandBuffer 觸發
+            int threadGroups = ((int)logicalElementCount + 63) / 64;
+            tensorCopyShader.Dispatch(m_TensorCopyKernel, threadGroups, 1, 1);
+        }
     }
 
     // LoadInputsForFrame 和其他輔助函式保持不變...
-    void LoadInputsForFrame(int frame)
+    void LoadInputsForFrame(int frame,bool SetInput)
     {
         string smplxFileName = $"{frame}.json";
         string smplxFilePath = Path.Combine(Application.streamingAssetsPath, motionFolderName, smplxFileName);
@@ -127,7 +164,9 @@ public class HumanGaussianInference : MonoBehaviour
                 {
                     // 使用 Upload() 來更新 Tensor 的內容，這比 Download 再 Copy 更有效率
                     tensor.Upload(values);
-                    worker.SetInput(key, tensor);
+                    if (SetInput) {
+                        worker.SetInput(key, tensor);
+                    }
                 }
                 else
                 {
