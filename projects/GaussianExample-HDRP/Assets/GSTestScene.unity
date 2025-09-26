@@ -728,7 +728,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 9124f2d24746a8b4babea675619726c1, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  modelPath: human_model_fix.onnx
+  modelAsset: {fileID: 5022602860645237092, guid: d6b3fb9d3db19634098cf767dabaa2c1, type: 3}
   motionFolderName: smplx_params_smoothed
   frameIndex: 0
   gaussianSplatRenderer: {fileID: 1609192434}

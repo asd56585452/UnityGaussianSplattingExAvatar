@@ -253,7 +253,7 @@ namespace GaussianSplatting.Runtime
         int m_SplatCount; // initially same as asset splat count, but editing can change this
         GraphicsBuffer m_GpuSortDistances;
         internal GraphicsBuffer m_GpuSortKeys;
-        GraphicsBuffer m_GpuPosData;
+        public GraphicsBuffer m_GpuPosData;
         GraphicsBuffer m_GpuOtherData;
         GraphicsBuffer m_GpuSHData;
         Texture m_GpuColorData;
@@ -1088,7 +1088,7 @@ namespace GaussianSplatting.Runtime
             if (m_GpuPosData != null && positions.Length * sizeof(float) <= m_GpuPosData.count * m_GpuPosData.stride)
             {
                 m_GpuPosData.SetData(positions);
-                Debug.Log($"Pos {positions.Length} * {sizeof(float)} <= {m_GpuPosData.count} * {m_GpuPosData.stride}");
+                //Debug.Log($"Pos {positions.Length} * {sizeof(float)} <= {m_GpuPosData.count} * {m_GpuPosData.stride}");
             }
             else
             {
