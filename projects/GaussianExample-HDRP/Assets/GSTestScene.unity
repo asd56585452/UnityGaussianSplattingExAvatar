@@ -729,10 +729,11 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   modelAsset: {fileID: 5022602860645237092, guid: d6b3fb9d3db19634098cf767dabaa2c1, type: 3}
+  tensorCopyShader: {fileID: 7200000, guid: 619c078d4ffbe0047b73b20bfc8628ee, type: 3}
+  cpuCopy: 0
   motionFolderName: smplx_params_smoothed
   frameIndex: 0
   gaussianSplatRenderer: {fileID: 1609192434}
-  tensorCopyShader: {fileID: 7200000, guid: 619c078d4ffbe0047b73b20bfc8628ee, type: 3}
 --- !u!1 &1809080840
 GameObject:
   m_ObjectHideFlags: 0
@@ -749,7 +750,7 @@ GameObject:
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
-  m_IsActive: 1
+  m_IsActive: 0
 --- !u!114 &1809080841
 MonoBehaviour:
   m_ObjectHideFlags: 0

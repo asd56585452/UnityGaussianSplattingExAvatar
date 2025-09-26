@@ -32,7 +32,7 @@ public class HumanGaussianInference : MonoBehaviour
     public GaussianSplatRenderer gaussianSplatRenderer;
 
     // --- 新增：公開的 Tensor 屬性，用於儲存最新的位置資料 ---
-    public Tensor<float> PosOutputTensor { get; private set; }
+    private Tensor<float> PosOutputTensor;
 
     private Dictionary<string, Tensor<float>> m_InputTensors = new Dictionary<string, Tensor<float>>();
 
