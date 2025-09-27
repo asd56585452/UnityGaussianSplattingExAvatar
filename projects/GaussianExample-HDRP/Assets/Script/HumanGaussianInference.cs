@@ -34,6 +34,12 @@ public class HumanGaussianInference : MonoBehaviour
     // --- 新增： Tensor 屬性，用於儲存最新的位置資料 ---
     private Tensor<float> PosOutputTensor;
     private Tensor<float> RGBOutputTensor;
+    private Tensor<float> ScaleOutputTensor;
+
+    // 用於儲存 m_GpuOtherData 的初始狀態（包含旋轉和縮放）
+    private byte[] m_InitialOtherData;
+    // 快取 GPU 緩衝區的引用
+    private GraphicsBuffer m_GpuOtherDataRef;
 
     private Dictionary<string, Tensor<float>> m_InputTensors = new Dictionary<string, Tensor<float>>();
 
@@ -93,6 +99,29 @@ public class HumanGaussianInference : MonoBehaviour
             Debug.LogError("TensorCopyShader 未在 InferenceRenderManager 中指定！");
         }
 
+        InitializeGpuData();
+    }
+
+    private void InitializeGpuData()
+    {
+
+        if (gaussianSplatRenderer == null)
+        {
+            Debug.LogError("GaussianSplatRenderer 未在 Inspector 中指定！");
+            return;
+        }
+        m_GpuOtherDataRef = gaussianSplatRenderer.GetGpuOtherData();
+        if (m_GpuOtherDataRef != null)
+        {
+            // 讀取一次 GPU 數據並儲存起來
+            m_InitialOtherData = new byte[m_GpuOtherDataRef.count * m_GpuOtherDataRef.stride];
+            m_GpuOtherDataRef.GetData(m_InitialOtherData);
+            Debug.Log($"成功讀取初始 'Other' 數據，大小: {m_InitialOtherData.Length} bytes。");
+        }
+        else
+        {
+            Debug.LogError("無法從 GaussianSplatRenderer 獲取 'Other' 數據緩衝區。");
+        }
     }
 
     void OnDisable()
@@ -113,6 +142,7 @@ public class HumanGaussianInference : MonoBehaviour
         // --- 更新公開的 Tensor 屬性 ---
         PosOutputTensor = worker.PeekOutput("mean_3d_refined") as Tensor<float>;
         RGBOutputTensor = worker.PeekOutput("rgb") as Tensor<float>;
+        ScaleOutputTensor = worker.PeekOutput("scale_refined") as Tensor<float>;
         if (cpuCopy)
         {
             var dataSpan = PosOutputTensor.DownloadToArray();
@@ -120,22 +150,44 @@ public class HumanGaussianInference : MonoBehaviour
             var colorSpan = RGBOutputTensor.DownloadToArray();
             float[] textureFloatData = ConvertColorsToFloatTexture(colorSpan);
             gaussianSplatRenderer.UpdateSplatColors(textureFloatData);
+            var scaleSpan = ScaleOutputTensor.DownloadToArray();
+            byte[] updatedOtherData = PrepareOtherData(scaleSpan);
+            gaussianSplatRenderer.UpdateGpuOtherData(updatedOtherData);
         }
         else
         {
-            var computeTensorData = ComputeTensorData.Pin(PosOutputTensor);
-            var sourceBuffer = computeTensorData.buffer;
-            uint logicalElementCount = (uint)PosOutputTensor.shape.length;
-            var destinationBuffer = gaussianSplatRenderer.GetGpuPosData();
-            if (logicalElementCount > destinationBuffer.count)
-            {
-                Debug.LogError($"目標 GraphicsBuffer 的大小不足以容納 Tensor 資料！ Tensor 需要 {logicalElementCount} 個元素, 但 Buffer 只有 {destinationBuffer.count} 個。");
-            }
-            tensorCopyShader.SetBuffer(m_TensorCopyKernel, "_Source", sourceBuffer);
-            tensorCopyShader.SetBuffer(m_TensorCopyKernel, "_Destination", destinationBuffer);
-            tensorCopyShader.SetInt("_ElementCount", (int)logicalElementCount);
+            // --- 合併後的 GPU 複製操作 ---
+            var posComputeTensorData = ComputeTensorData.Pin(PosOutputTensor);
+            var rgbComputeTensorData = ComputeTensorData.Pin(RGBOutputTensor);
+            var scaleComputeTensorData = ComputeTensorData.Pin(ScaleOutputTensor);
 
-            int threadGroups = ((int)logicalElementCount + 63) / 64;
+            var posSourceBuffer = posComputeTensorData.buffer;
+            var rgbSourceBuffer = rgbComputeTensorData.buffer;
+            var scaleSourceBuffer = scaleComputeTensorData.buffer;
+
+            var posDestinationBuffer = gaussianSplatRenderer.GetGpuPosData();
+            var otherDestinationBuffer = gaussianSplatRenderer.GetGpuOtherData();
+            var rgbDestinationTexture = gaussianSplatRenderer.GetGpuColorData();
+
+            uint splatCount = (uint)PosOutputTensor.shape.length / 3;
+
+            if (posDestinationBuffer == null || rgbDestinationTexture == null || otherDestinationBuffer == null)
+            {
+                Debug.LogError("一個或多個目標緩衝區為空！");
+                return;
+            }
+
+            // --- 為單一核心設置所有資源 ---
+            tensorCopyShader.SetBuffer(m_TensorCopyKernel, "_SourcePos", posSourceBuffer);
+            tensorCopyShader.SetBuffer(m_TensorCopyKernel, "_SourceRGB", rgbSourceBuffer);
+            tensorCopyShader.SetBuffer(m_TensorCopyKernel, "_SourceScale", scaleSourceBuffer);
+            tensorCopyShader.SetBuffer(m_TensorCopyKernel, "_DestinationPos", posDestinationBuffer);
+            tensorCopyShader.SetBuffer(m_TensorCopyKernel, "_DestinationOther", otherDestinationBuffer);
+            tensorCopyShader.SetTexture(m_TensorCopyKernel, "_DestinationRGB", rgbDestinationTexture);
+            tensorCopyShader.SetInt("_SplatCount", (int)splatCount);
+
+            // --- 執行一次 Dispatch ---
+            int threadGroups = ((int)splatCount + 1024) / 1024;
             tensorCopyShader.Dispatch(m_TensorCopyKernel, threadGroups, 1, 1);
         }
     }
@@ -224,6 +276,54 @@ public class HumanGaussianInference : MonoBehaviour
         // 陣列中剩餘的部分將預設為 0，這對於未使用的像素是安全的。
 
         return textureData;
+    }
+
+    /// <summary>
+    /// 將 ONNX輸出的 scale 數據與初始的 rotation 數據合併，
+    /// 並轉換為符合 GpuOtherData 緩衝區格式的 byte[]。
+    /// </summary>
+    private byte[] PrepareOtherData(float[] scales)
+    {
+        if (m_InitialOtherData == null)
+        {
+            Debug.LogWarning("初始 'Other' 數據尚未準備好，跳過更新。");
+            return null;
+        }
+
+        // 創建一個新的 byte 陣列，內容是初始數據的副本
+        byte[] updatedData = new byte[m_InitialOtherData.Length];
+        Buffer.BlockCopy(m_InitialOtherData, 0, updatedData, 0, m_InitialOtherData.Length);
+
+        int splatCount = scales.Length / 3;
+        // 對於 VeryHigh 品質，每個 splat 的 "Other" 數據由 4 bytes 旋轉 + 12 bytes 縮放組成
+        int stride = m_InitialOtherData.Length / splatCount;
+
+        for (int i = 0; i < splatCount; i++)
+        {
+            // 計算當前 splat 的 scale 數據在 byte 陣列中的起始位置
+            // (跳過前面的 i * stride bytes，再加上 4 bytes 的旋轉數據)
+            int scaleByteOffset = (i * stride) + 4;
+
+            // 檢查邊界，防止寫入超出範圍
+            if (scaleByteOffset + 12 > updatedData.Length)
+            {
+                Debug.LogError($"索引 {i} 超出緩衝區邊界，停止更新。");
+                break;
+            }
+
+            // GPU 緩衝區中儲存的是對數縮放 (log scale)，所以我們需要將模型的線性縮放值轉換
+            // 為模型輸出的 [0,1] 範圍加上一個極小值防止 log(0)
+            float sx = scales[i * 3 + 0];
+            float sy = scales[i * 3 + 1];
+            float sz = scales[i * 3 + 2];
+
+            // 將三個 float 轉換為 bytes 並寫入到 updatedData 陣列的正確位置
+            Buffer.BlockCopy(BitConverter.GetBytes(sx), 0, updatedData, scaleByteOffset + 0, 4);
+            Buffer.BlockCopy(BitConverter.GetBytes(sy), 0, updatedData, scaleByteOffset + 4, 4);
+            Buffer.BlockCopy(BitConverter.GetBytes(sz), 0, updatedData, scaleByteOffset + 8, 4);
+        }
+
+        return updatedData;
     }
 
     void OnDestroy()

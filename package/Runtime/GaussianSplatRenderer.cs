@@ -256,7 +256,7 @@ namespace GaussianSplatting.Runtime
         GraphicsBuffer m_GpuPosData;
         GraphicsBuffer m_GpuOtherData;
         GraphicsBuffer m_GpuSHData;
-        Texture m_GpuColorData;
+        RenderTexture m_GpuColorData;
         internal GraphicsBuffer m_GpuChunks;
         internal bool m_GpuChunksValid;
         internal GraphicsBuffer m_GpuView;
@@ -382,12 +382,36 @@ namespace GaussianSplatting.Runtime
             m_GpuOtherData.SetData(asset.otherData.GetData<uint>());
             m_GpuSHData = new GraphicsBuffer(GraphicsBuffer.Target.Raw, (int) (asset.shData.dataSize / 4), 4) { name = "GaussianSHData" };
             m_GpuSHData.SetData(asset.shData.GetData<uint>());
+            // var (texWidth, texHeight) = GaussianSplatAsset.CalcTextureSize(asset.splatCount);
+            // var texFormat = GaussianSplatAsset.ColorFormatToGraphics(asset.colorFormat);
+            // var tex = new Texture2D(texWidth, texHeight, texFormat, TextureCreationFlags.DontInitializePixels | TextureCreationFlags.IgnoreMipmapLimit | TextureCreationFlags.DontUploadUponCreate) { name = "GaussianColorData" };
+            // tex.SetPixelData(asset.colorData.GetData<byte>(), 0);
+            // tex.Apply(false, false);
+            // m_GpuColorData = tex;
+
+            // --- 修改後的程式碼 ---
             var (texWidth, texHeight) = GaussianSplatAsset.CalcTextureSize(asset.splatCount);
             var texFormat = GaussianSplatAsset.ColorFormatToGraphics(asset.colorFormat);
-            var tex = new Texture2D(texWidth, texHeight, texFormat, TextureCreationFlags.DontInitializePixels | TextureCreationFlags.IgnoreMipmapLimit | TextureCreationFlags.DontUploadUponCreate) { name = "GaussianColorData" };
-            tex.SetPixelData(asset.colorData.GetData<byte>(), 0);
-            tex.Apply(false, false);
-            m_GpuColorData = tex;
+
+            // 1. 創建一個可寫的 RenderTexture
+            m_GpuColorData = new RenderTexture(texWidth, texHeight, 0, texFormat)
+            {
+                name = "GaussianColorData",
+                enableRandomWrite = true // 這是讓 Compute Shader 可以寫入的關鍵
+            };
+            m_GpuColorData.Create();
+
+            // 2. 創建一個臨時的 Texture2D 來載入初始數據
+            var tempTex = new Texture2D(texWidth, texHeight, texFormat, TextureCreationFlags.DontInitializePixels | TextureCreationFlags.IgnoreMipmapLimit);
+            tempTex.SetPixelData(asset.colorData.GetData<byte>(), 0);
+            tempTex.Apply(false, false);
+
+            // 3. 將初始數據從 Texture2D 複製到 RenderTexture
+            Graphics.Blit(tempTex, m_GpuColorData);
+
+            // 4. 銷毀臨時 Texture2D
+            DestroyImmediate(tempTex);
+
             if (asset.chunkData != null && asset.chunkData.dataSize != 0)
             {
                 m_GpuChunks = new GraphicsBuffer(GraphicsBuffer.Target.Structured,
@@ -1105,6 +1129,7 @@ namespace GaussianSplatting.Runtime
             }
         }
 
+        public Texture GetGpuColorData() => m_GpuColorData;
         public int ColorTextureWidth => m_GpuColorData ? m_GpuColorData.width : 0;
         public int ColorTextureHeight => m_GpuColorData ? m_GpuColorData.height : 0;
 
@@ -1117,24 +1142,38 @@ namespace GaussianSplatting.Runtime
                 return;
             }
 
-            Texture2D colorTex = m_GpuColorData as Texture2D;
-            if (colorTex == null)
-            {
-                Debug.LogWarning("m_GpuColorData 不是 Texture2D，無法使用此方法直接更新顏色。");
-                return;
-            }
+            // m_GpuColorData 現在是 RenderTexture，不能直接轉型為 Texture2D
+            // 我們需要透過一個臨時的 Texture2D 作為中介
+            RenderTexture colorRT = m_GpuColorData as RenderTexture;
 
+            // --- 以下是處理 RenderTexture 的新邏輯 ---
+
+            // 1. 創建一個與 RenderTexture 相同規格的臨時 Texture2D
+            var tempTex = new Texture2D(
+                colorRT.width,
+                colorRT.height,
+                colorRT.graphicsFormat,
+                TextureCreationFlags.None
+            );
+
+            // 2. 將 float[] 數據載入到這個臨時 Texture2D 中
             // 每個像素由 4 個浮點數 (R,G,B,A) 組成
-            int expectedFloatCount = colorTex.width * colorTex.height * 4;
+            int expectedFloatCount = tempTex.width * tempTex.height * 4;
             if (colorData.Length != expectedFloatCount)
             {
                 Debug.LogError($"更新 splat 顏色失敗。顏色數據大小 ({colorData.Length} floats) 與期望的紋理大小 ({expectedFloatCount} floats) 不匹配。");
+                DestroyImmediate(tempTex); // 清理臨時紋理
                 return;
             }
+            tempTex.SetPixelData(colorData, 0);
+            tempTex.Apply(false, false); // 必須 Apply 才能上傳到 GPU
 
-            // 使用 SetPixelData<float> 來更新浮點數紋理
-            colorTex.SetPixelData(colorData, 0);
-            colorTex.Apply(false, false); // 上傳到 GPU
+            // 3. 使用 Graphics.Blit 將臨時紋理的內容複製到 RenderTexture
+            // 這是 GPU 上的操作，效率很高
+            Graphics.Blit(tempTex, colorRT);
+
+            // 4. 銷毀臨時紋理，避免內存洩漏
+            DestroyImmediate(tempTex);
         }
 
         public GraphicsBuffer GetGpuOtherData() => m_GpuOtherData;

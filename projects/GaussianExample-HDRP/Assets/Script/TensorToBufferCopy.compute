@@ -1,15 +1,53 @@
 #pragma kernel CSMain
 
-StructuredBuffer<float> _Source;
-RWStructuredBuffer<float> _Destination;
-uint _ElementCount; // 新增一個變數來儲存元素總數
+#include "Packages/org.nesnausk.gaussian-splatting/Shaders/GaussianSplatting.hlsl"
 
-[numthreads(64, 1, 1)]
+// --- 輸入 ---
+StructuredBuffer<float> _SourcePos; // 位置數據 (mean_3d_refined)
+StructuredBuffer<float> _SourceRGB; // 顏色數據 (rgb)
+StructuredBuffer<float> _SourceScale; // 縮放數據 (scale_refined)
+
+// --- 輸出 ---
+RWStructuredBuffer<float> _DestinationPos; // splat 的位置緩衝區
+RWTexture2D<float4> _DestinationRGB; // splat 的顏色紋理
+RWByteAddressBuffer _DestinationOther; // splat 的其他數據緩衝區 (旋轉 + 縮放)
+
+uint _SplatCount; // splat 的總數
+
+[numthreads(1024, 1, 1)]
 void CSMain(uint3 id : SV_DispatchThreadID)
 {
-    // 邊界檢查：只有當前執行緒的 ID 小於元素總數時，才進行複製
-    if (id.x < _ElementCount)
+    // id.x 代表 splat 的索引
+    if (id.x >= _SplatCount)
     {
-        _Destination[id.x] = _Source[id.x];
+        return;
     }
+
+    uint base_idx = id.x * 3;
+
+    // --- 1. 處理位置數據 ---
+    _DestinationPos[base_idx + 0] = _SourcePos[base_idx + 0];
+    _DestinationPos[base_idx + 1] = _SourcePos[base_idx + 1];
+    _DestinationPos[base_idx + 2] = _SourcePos[base_idx + 2];
+
+    // --- 2. 處理顏色數據 ---
+    uint3 pixelIndex = SplatIndexToPixelIndex(id.x);
+    float r = _SourceRGB[base_idx + 0];
+    float g = _SourceRGB[base_idx + 1];
+    float b = _SourceRGB[base_idx + 2];
+    _DestinationRGB[pixelIndex.xy] = float4(r, g, b, 1.0f);
+
+    // --- 3. 處理縮放數據 ---
+    // GpuOtherData 的結構是 [4 bytes rotation | 12 bytes scale]
+    // 所以每個 splat 的 stride 是 16 bytes
+    // 縮放數據從第 4 個 byte 開始
+    uint scaleByteOffset = (id.x * 16) + 4;
+    
+    // 從來源緩衝區讀取縮放值
+    float sx = _SourceScale[base_idx + 0];
+    float sy = _SourceScale[base_idx + 1];
+    float sz = _SourceScale[base_idx + 2];
+
+    // 將三個 float (12 bytes) 寫入到目標緩衝區的正確位置
+    _DestinationOther.Store3(scaleByteOffset, asuint(float3(sx, sy, sz)));
 }
