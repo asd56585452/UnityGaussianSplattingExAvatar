@@ -31,8 +31,9 @@ public class HumanGaussianInference : MonoBehaviour
     // --- 將 GaussianSplatRenderer 設為 public，以便從外部連結 ---
     public GaussianSplatRenderer gaussianSplatRenderer;
 
-    // --- 新增：公開的 Tensor 屬性，用於儲存最新的位置資料 ---
+    // --- 新增： Tensor 屬性，用於儲存最新的位置資料 ---
     private Tensor<float> PosOutputTensor;
+    private Tensor<float> RGBOutputTensor;
 
     private Dictionary<string, Tensor<float>> m_InputTensors = new Dictionary<string, Tensor<float>>();
 
@@ -111,10 +112,14 @@ public class HumanGaussianInference : MonoBehaviour
 
         // --- 更新公開的 Tensor 屬性 ---
         PosOutputTensor = worker.PeekOutput("mean_3d_refined") as Tensor<float>;
+        RGBOutputTensor = worker.PeekOutput("rgb") as Tensor<float>;
         if (cpuCopy)
         {
             var dataSpan = PosOutputTensor.DownloadToArray();
             gaussianSplatRenderer.UpdateSplatPositions(dataSpan);
+            var colorSpan = RGBOutputTensor.DownloadToArray();
+            float[] textureFloatData = ConvertColorsToFloatTexture(colorSpan);
+            gaussianSplatRenderer.UpdateSplatColors(textureFloatData);
         }
         else
         {
@@ -175,6 +180,50 @@ public class HumanGaussianInference : MonoBehaviour
                 }
             }
         }
+    }
+
+    private float[] ConvertColorsToFloatTexture(float[] modelOutputColors)
+    {
+        if (gaussianSplatRenderer == null) return null;
+
+        // 從 renderer 獲取正確的紋理尺寸
+        int texWidth = gaussianSplatRenderer.ColorTextureWidth;
+        int texHeight = gaussianSplatRenderer.ColorTextureHeight;
+
+        if (texWidth == 0 || texHeight == 0)
+        {
+            Debug.LogError("Color texture dimensions from GaussianSplatRenderer are zero.");
+            return null;
+        }
+        // 模型的輸出是 splat 數量 x 3 (RGB)
+        int splatCount = modelOutputColors.Length / 3;
+        // 我們需要建立一個能填滿整個紋理的陣列 (寬 x 高 x 4 個通道)
+        float[] textureData = new float[texWidth * texHeight * 4];
+
+        for (int i = 0; i < splatCount; i++)
+        {
+            int modelIndex = i * 3;
+
+            /*****************************************************************
+             * * 核心修改: 使用正確的索引來寫入紋理
+             * 調用我們剛剛移動到 GaussianUtils.cs 的函式
+             * *****************************************************************/
+            int texturePixelIndex = GaussianUtils.SplatIndexToTextureIndex((uint)i);
+            int textureDataIndex = texturePixelIndex * 4;
+
+            if (textureDataIndex < textureData.Length - 4)
+            {
+                // 將 RGB 數據從模型輸出複製到紋理陣列的正確位置
+                textureData[textureDataIndex + 0] = modelOutputColors[modelIndex + 0]; // R
+                textureData[textureDataIndex + 1] = modelOutputColors[modelIndex + 1]; // G
+                textureData[textureDataIndex + 2] = modelOutputColors[modelIndex + 2]; // B
+                textureData[textureDataIndex + 3] = 1.0f;                               // Alpha
+            }
+        }
+
+        // 陣列中剩餘的部分將預設為 0，這對於未使用的像素是安全的。
+
+        return textureData;
     }
 
     void OnDestroy()
