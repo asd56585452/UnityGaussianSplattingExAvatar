@@ -511,7 +511,7 @@ Transform:
   m_GameObject: {fileID: 1462254335}
   serializedVersion: 2
   m_LocalRotation: {x: 0, y: 0.99977964, z: -0.020994725, w: 0}
-  m_LocalPosition: {x: 0.07253727, y: -0.13307099, z: 2.230627}
+  m_LocalPosition: {x: 0.07253727, y: -0.13307099, z: 0.5}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
@@ -710,13 +710,13 @@ Transform:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 1609192433}
   serializedVersion: 2
-  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalRotation: {x: -1, y: 0, z: 0, w: 0}
   m_LocalPosition: {x: 0, y: 0, z: 0}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
   m_Father: {fileID: 0}
-  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+  m_LocalEulerAnglesHint: {x: -180, y: 0, z: 0}
 --- !u!114 &1609192436
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -731,7 +731,6 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   modelAsset: {fileID: 5022602860645237092, guid: 1b2064669e9994043b8c9c5911b041bc, type: 3}
   tensorCopyShader: {fileID: 7200000, guid: 619c078d4ffbe0047b73b20bfc8628ee, type: 3}
-  cpuCopy: 0
   motionFolderName: smplx_params_smoothed
   frameIndex: 0
   gaussianSplatRenderer: {fileID: 1609192434}

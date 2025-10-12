@@ -62,6 +62,7 @@ public class SkeletonBuilder : MonoBehaviour
     void Update()
     {
         SetPose();
+        SetSkinningMatrix();
         DispatchLBS();
     }
 
@@ -103,6 +104,16 @@ public class SkeletonBuilder : MonoBehaviour
         LBSComputeShader.Dispatch(kernel, threadGroups, 1, 1);
     }
 
+    private void SetSkinningMatrix()
+    {
+        int jointCount = joints.Length;
+        skinningMatrix = new Matrix4x4[jointCount];
+        for (int i = 0; i < jointCount; i++)
+        {
+            skinningMatrix[i] = this.transform.worldToLocalMatrix * joints[i].transform.localToWorldMatrix * mTransformMatZeroPose[i].inverse * mTransformMatNeutralPose[i];
+        }
+    }
+
     private void SetPose()
     {
         if (setPose == false) return;
@@ -118,12 +129,6 @@ public class SkeletonBuilder : MonoBehaviour
             {
                 joints[i].transform.localPosition = humanGaussianInference.smplxPoseTrans;
             }
-        }
-        
-        skinningMatrix = new Matrix4x4[jointCount];
-        for (int i = 0; i < jointCount; i++)
-        {
-            skinningMatrix[i] = this.transform.worldToLocalMatrix * joints[i].transform.localToWorldMatrix * mTransformMatZeroPose[i].inverse * mTransformMatNeutralPose[i];
         }
     }
 
@@ -172,26 +177,32 @@ public class SkeletonBuilder : MonoBehaviour
         for (int i = 0; i < jointCount; i++)
         {
             int parentIndex = parentArray[i];
+            Transform parentTransform = null; // 用於傳遞給 JointGizmo
 
             // 如果 parentIndex 是 -1，代表這是根節點 (root)，它沒有父節點
             if (parentIndex == -1)
             {
                 // 將根節點設置為 SkeletonManager 的子物件，方便管理
                 joints[i].transform.SetParent(this.transform, false);
-                continue;
             }
-
             // 進行安全檢查，確保父節點索引有效
-            if (parentIndex >= 0 && parentIndex < jointCount)
+            else if (parentIndex >= 0 && parentIndex < jointCount)
             {
                 // 設定父子關係
-                // worldPositionStays: false 參數非常重要！
-                // 它確保在設定父節點後，物件的 localPosition 仍然是我們在第一階段設定的值。
                 joints[i].transform.SetParent(joints[parentIndex].transform, true);
+                parentTransform = joints[parentIndex].transform;
             }
             else
             {
                 Debug.LogWarning($"關節 {i} 的父節點索引 {parentIndex} 無效。");
+            }
+            if (drawGizmos) // 根據 drawGizmos 的設定來決定是否添加
+            {
+                JointGizmo gizmo = joints[i].AddComponent<JointGizmo>();
+                gizmo.parentTransform = parentTransform;
+                gizmo.jointColor = this.jointColor;
+                gizmo.jointRadius = this.jointRadius;
+                gizmo.boneColor = this.boneColor;
             }
         }
         for (int i = 0; i < jointCount; i++)
@@ -316,40 +327,6 @@ public class SkeletonBuilder : MonoBehaviour
         Vector3 axis_normalized = axis / angle_rad;
 
         return Quaternion.AngleAxis(angle_deg, axis_normalized);
-    }
-
-    /// <summary>
-    /// 在 Unity 編輯器的 Scene 視窗中繪製輔助線，方便觀察
-    /// </summary>
-    void OnDrawGizmos()
-    {
-        if (!drawGizmos || joints == null || joints.Length == 0)
-        {
-            return;
-        }
-
-        // 遍歷所有關節
-        for (int i = 0; i < joints.Length; i++)
-        {
-            if (joints[i] == null) continue;
-
-            Transform currentJoint = joints[i].transform;
-
-            // 繪製關節點 (球體)
-            Gizmos.color = jointColor;
-            Gizmos.DrawSphere(currentJoint.position, jointRadius);
-
-            // 繪製連接到父節點的骨骼 (線段)
-            int parentIndex = parentArray[i];
-            if (parentIndex != -1 && parentIndex >= 0 && parentIndex < joints.Length)
-            {
-                if (joints[parentIndex] == null) continue;
-
-                Transform parentJoint = joints[parentIndex].transform;
-                Gizmos.color = boneColor;
-                Gizmos.DrawLine(currentJoint.position, parentJoint.position);
-            }
-        }
     }
 
     void OnDestroy()
