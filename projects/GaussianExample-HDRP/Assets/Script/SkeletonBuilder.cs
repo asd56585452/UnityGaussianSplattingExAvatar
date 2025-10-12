@@ -1,4 +1,5 @@
 using UnityEngine;
+using Unity.InferenceEngine;
 using UnityEngine.Rendering; // CommandBuffer 需要這個 namespace
 
 public class SkeletonBuilder : MonoBehaviour
@@ -7,17 +8,19 @@ public class SkeletonBuilder : MonoBehaviour
 
     [Header("骨架數據")]
     [Tooltip("父節點索引陣列。例如 parentArray[i] = j 代表第 i 個節點的父節點是第 j 個節點。根節點的父節點應為 -1。")]
-    public int[] parentArray;
+    private int[] parentArray;
 
     [Tooltip("T-Pose 下各節點相對於其父節點的局部位置 (Local Position)。")]
-    public Vector3[] tPoseLocalPositions;
-    public Matrix4x4[] mTransformMatZeroPose;
+    private Vector3[] tPoseLocalPositions;
+    private Matrix4x4[] mTransformMatZeroPose;
 
     [Tooltip("大-Pose TransformMat。")]
-    public Matrix4x4[] mTransformMatNeutralPose;
+    private Matrix4x4[] mTransformMatNeutralPose;
 
     [Tooltip("大-Pose to Pose TransformMat。")]
-    public Matrix4x4[] skinningMatrix;
+    private Matrix4x4[] skinningMatrix;
+
+    public bool setPose = true;
 
     [Header("視覺化設定")]
     [Tooltip("是否在編輯器中繪製骨架 Gizmos")]
@@ -36,6 +39,7 @@ public class SkeletonBuilder : MonoBehaviour
     CommandBuffer cb;
     public ComputeShader LBSComputeShader;
     private int m_LBSComputeKernel;
+    private ComputeBuffer m_SkinningMatrixBuffer;
 
     void OnEnable()
     {
@@ -58,23 +62,50 @@ public class SkeletonBuilder : MonoBehaviour
     void Update()
     {
         SetPose();
-        LBSUpdate();
+        DispatchLBS();
     }
 
-    private void LBSUpdate()
+    /// <summary>
+    /// 執行 LBS Compute Shader
+    /// </summary>
+    public void DispatchLBS()
     {
-        var posDestinationBuffer = humanGaussianInference.gaussianSplatRenderer.GetGpuPosData();
-        LBSComputeShader.SetBuffer(m_LBSComputeKernel, "_SourcePos", humanGaussianInference.m_GpuPosData);
-        LBSComputeShader.SetBuffer(m_LBSComputeKernel, "_DestinationPos", posDestinationBuffer);
+        var SkinningWeightTensorData = ComputeTensorData.Pin(humanGaussianInference.SkinningWeightTensor);
+        if (LBSComputeShader == null || skinningMatrix == null || skinningMatrix.Length == 0)
+        {
+            Debug.LogError("LBS Compute Shader 或 Skinning Matrix 未設置！");
+            return;
+        }
 
         uint splatCount = humanGaussianInference.splatCount;
+        if (splatCount == 0) return;
+
+        // 1. 更新並設置 Skinning Matrix 數據到 GPU
+        m_SkinningMatrixBuffer.SetData(skinningMatrix);
+
+        // 2. 找到 Kernel 的索引
+        int kernel = LBSComputeShader.FindKernel("CSMain");
+
+        // 3. 設置 Shader 的輸入和輸出緩衝區
+        LBSComputeShader.SetBuffer(kernel, "_SourcePos", humanGaussianInference.m_GpuPosData);
+        LBSComputeShader.SetBuffer(kernel, "_SkinningWeights", SkinningWeightTensorData.buffer);
+        LBSComputeShader.SetBuffer(kernel, "_SkinningMatrices", m_SkinningMatrixBuffer);
+
+        // 從 Renderer 獲取目標位置緩衝區並設置
+        LBSComputeShader.SetBuffer(kernel, "_DestinationPos", humanGaussianInference.gaussianSplatRenderer.GetGpuPosData());
+
+        // 4. 設置其他參數
         LBSComputeShader.SetInt("_SplatCount", (int)splatCount);
-        int threadGroups = ((int)splatCount + 1023) / 1024;
-        LBSComputeShader.Dispatch(m_LBSComputeKernel, threadGroups, 1, 1);
+        LBSComputeShader.SetInt("_JointCount", (int)joints.Length);
+
+        // 5. 計算執行緒組數量並調度
+        int threadGroups = Mathf.CeilToInt(splatCount / 1024.0f);
+        LBSComputeShader.Dispatch(kernel, threadGroups, 1, 1);
     }
 
     private void SetPose()
     {
+        if (setPose == false) return;
         int jointCount = joints.Length;
         for (int i = 0; i < jointCount; i++)
         {
@@ -83,11 +114,16 @@ public class SkeletonBuilder : MonoBehaviour
             float z = humanGaussianInference.smplxPose[i * 3 + 2];
             Quaternion rootRot = QuatFromRodrigues(x, y, z);
             joints[i].transform.localRotation = rootRot;
+            if (parentArray[i]==-1)
+            {
+                joints[i].transform.localPosition = humanGaussianInference.smplxPoseTrans;
+            }
         }
+        
         skinningMatrix = new Matrix4x4[jointCount];
         for (int i = 0; i < jointCount; i++)
         {
-            skinningMatrix[i] = joints[i].transform.localToWorldMatrix * mTransformMatZeroPose[i].inverse * mTransformMatNeutralPose[i];
+            skinningMatrix[i] = this.transform.worldToLocalMatrix * joints[i].transform.localToWorldMatrix * mTransformMatZeroPose[i].inverse * mTransformMatNeutralPose[i];
         }
     }
 
@@ -117,6 +153,7 @@ public class SkeletonBuilder : MonoBehaviour
         int jointCount = parentArray.Length;
         joints = new GameObject[jointCount];
         mTransformMatZeroPose = new Matrix4x4[jointCount];
+        m_SkinningMatrixBuffer = new ComputeBuffer(jointCount, sizeof(float) * 16);
 
         // --- 第一階段：創建所有關節物件並設定其局部位置 ---
         // 我們需要先創建所有物件，才能在下一步中設定父子關係
@@ -124,11 +161,11 @@ public class SkeletonBuilder : MonoBehaviour
         {
             // 創建一個新的 GameObject 來代表關節
             joints[i] = new GameObject("Joint_" + i);
+            joints[i].transform.SetParent(this.transform, false);
 
             // 設定此關節相對於其未來父節點的局部位置
             // 注意：此時它的父節點是場景根目錄，所以 localPosition 和 world position 暫時是相同的
             joints[i].transform.localPosition = tPoseLocalPositions[i];
-            mTransformMatZeroPose[i] = joints[i].transform.localToWorldMatrix;
         }
 
         // --- 第二階段：根據 parentArray 建立父子層級關係 ---
@@ -156,6 +193,10 @@ public class SkeletonBuilder : MonoBehaviour
             {
                 Debug.LogWarning($"關節 {i} 的父節點索引 {parentIndex} 無效。");
             }
+        }
+        for (int i = 0; i < jointCount; i++)
+        {
+            mTransformMatZeroPose[i] = this.transform.worldToLocalMatrix * joints[i].transform.localToWorldMatrix;
         }
 
         Debug.Log("骨架建立完成！");
@@ -309,5 +350,12 @@ public class SkeletonBuilder : MonoBehaviour
                 Gizmos.DrawLine(currentJoint.position, parentJoint.position);
             }
         }
+    }
+
+    void OnDestroy()
+    {
+        // 釋放緩衝區，防止記憶體洩漏
+        m_SkinningMatrixBuffer?.Release();
+        m_SkinningMatrixBuffer = null;
     }
 }

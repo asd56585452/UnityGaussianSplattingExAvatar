@@ -735,7 +735,10 @@ MonoBehaviour:
   motionFolderName: smplx_params_smoothed
   frameIndex: 0
   gaussianSplatRenderer: {fileID: 1609192434}
+  splatCount: 0
   smplxPose: []
+  smplxPoseTrans: {x: 0, y: 0, z: 0}
+  refine: 1
 --- !u!114 &1609192437
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -749,11 +752,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   humanGaussianInference: {fileID: 1609192436}
-  parentArray: 
-  tPoseLocalPositions: []
-  mTransformMatZeroPose: []
-  mTransformMatNeutralPose: []
-  skinningMatrix: []
+  setPose: 1
   drawGizmos: 1
   jointColor: {r: 0, g: 1, b: 0, a: 1}
   jointRadius: 0.01

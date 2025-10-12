@@ -21,11 +21,13 @@ public class HumanGaussianInference : MonoBehaviour
 
     public ComputeShader tensorCopyShader;
     private int m_TensorCopyKernel;
-    public bool cpuCopy;
+    //public bool cpuCopy;
 
     [Header("Animation Data")]
     public string motionFolderName = "smplx_params_smoothed";
-    [Range(0, 2065)]
+    private List<Dictionary<string, JToken>> m_AllFramesData;
+    public const int FrameIndexMax = 2065;
+    [Range(0, FrameIndexMax)]
     public int frameIndex = 0;
 
     // --- 將 GaussianSplatRenderer 設為 public，以便從外部連結 ---
@@ -41,6 +43,8 @@ public class HumanGaussianInference : MonoBehaviour
     public Tensor<int> ParentsTensor;
     public Tensor<float> TransformMatNeutralPoseTensor;
     public List<float> smplxPose;
+    public Vector3 smplxPoseTrans;
+    public bool refine = true;
     public Tensor<float> SkinningWeightTensor;
 
     // 用於儲存 m_GpuOtherData 的初始狀態（包含旋轉和縮放）
@@ -63,6 +67,7 @@ public class HumanGaussianInference : MonoBehaviour
          "root_pose","body_pose", "jaw_pose", "leye_pose", "reye_pose",
         "lhand_pose", "rhand_pose"
     };
+    private readonly string smplxPoseTransKey = "trans";
 
     void OnEnable()
     {
@@ -71,6 +76,9 @@ public class HumanGaussianInference : MonoBehaviour
         {
             Instances.Add(this);
         }
+
+        // 預先載入所有動畫資料
+        PreloadAllMotionData();
 
         runtimeModel = ModelLoader.Load(modelAsset);
 
@@ -129,6 +137,7 @@ public class HumanGaussianInference : MonoBehaviour
         JointZeroPoseTensor = worker.PeekOutput("joint_zero_pose") as Tensor<float>;
         ParentsTensor = worker.PeekOutput("parents") as Tensor<int>;
         TransformMatNeutralPoseTensor = worker.PeekOutput("transform_mat_neutral_pose") as Tensor<float>;
+        SkinningWeightTensor = worker.PeekOutput("skinning_weight") as Tensor<float>;
     }
 
     private void InitializeGpuData()
@@ -178,27 +187,22 @@ public class HumanGaussianInference : MonoBehaviour
             cmd.ScheduleWorker(worker);
 
             // --- 更新公開的 Tensor 屬性 ---
-            PosOutputTensor = worker.PeekOutput("mean_3d_refined") as Tensor<float>;
-            RGBOutputTensor = worker.PeekOutput("rgb") as Tensor<float>;
-            ScaleOutputTensor = worker.PeekOutput("scale_refined") as Tensor<float>;
-            SkinningWeightTensor = worker.PeekOutput("skinning_weight") as Tensor<float>;
-
-            if (cpuCopy)
+            if (refine)
             {
-                // 如果是 CPU 複製，需要等待 GPU 完成
-                Graphics.ExecuteCommandBuffer(cmd);
-                //worker.Sync(); // 確保 worker 完成
-
-                var dataSpan = PosOutputTensor.DownloadToArray();
-                gaussianSplatRenderer.UpdateSplatPositions(dataSpan);
-                var colorSpan = RGBOutputTensor.DownloadToArray();
-                float[] textureFloatData = ConvertColorsToFloatTexture(colorSpan);
-                gaussianSplatRenderer.UpdateSplatColors(textureFloatData);
-                var scaleSpan = ScaleOutputTensor.DownloadToArray();
-                byte[] updatedOtherData = PrepareOtherData(scaleSpan);
-                gaussianSplatRenderer.UpdateGpuOtherData(updatedOtherData);
+                PosOutputTensor = worker.PeekOutput("mean_3d_refined") as Tensor<float>;
+                RGBOutputTensor = worker.PeekOutput("rgb") as Tensor<float>;
+                ScaleOutputTensor = worker.PeekOutput("scale_refined") as Tensor<float>;
             }
             else
+            {
+                PosOutputTensor = worker.PeekOutput("mean_3d") as Tensor<float>;
+                RGBOutputTensor = worker.PeekOutput("rgb") as Tensor<float>;
+                ScaleOutputTensor = worker.PeekOutput("scale") as Tensor<float>;
+            }
+            
+
+            
+             
             {
                 // --- GPU 複製操作 ---
                 var posComputeTensorData = ComputeTensorData.Pin(PosOutputTensor);
@@ -240,20 +244,24 @@ public class HumanGaussianInference : MonoBehaviour
         }
     }
 
+    // 新增：預載入所有 JSON 資料到記憶體中
+    private void PreloadAllMotionData()
+    {
+        m_AllFramesData = new List<Dictionary<string, JToken>>();
+
+        for (int i = 0; i <= FrameIndexMax; i++) {
+            string smplxFileName = $"{i}.json";
+            string smplxFilePath = Path.Combine(Application.streamingAssetsPath, motionFolderName, smplxFileName);
+            string smplxJsonContent = File.ReadAllText(smplxFilePath);
+            Dictionary<string, JToken> smplxData = JsonConvert.DeserializeObject<Dictionary<string, JToken>>(smplxJsonContent);
+            m_AllFramesData.Add(smplxData);
+        }
+    }
+
     // LoadInputsForFrame 和其他輔助函式保持不變...
     void LoadInputsForFrame(int frame,bool SetInput)
     {
-        string smplxFileName = $"{frame}.json";
-        string smplxFilePath = Path.Combine(Application.streamingAssetsPath, motionFolderName, smplxFileName);
-
-        if (!File.Exists(smplxFilePath))
-        {
-            // 如果檔案不存在，可以選擇跳過這一幀的更新
-            return;
-        }
-
-        string smplxJsonContent = File.ReadAllText(smplxFilePath);
-        var smplxData = JsonConvert.DeserializeObject<Dictionary<string, JToken>>(smplxJsonContent);
+        Dictionary<string, JToken> smplxData = m_AllFramesData[frame];
 
         foreach (string key in smplxKeys)
         {
@@ -290,6 +298,11 @@ public class HumanGaussianInference : MonoBehaviour
                 float[] values = smplxData[key].ToObject<float[]>();
                 smplxPose.AddRange(values);
             }
+        }
+
+        if (smplxData.ContainsKey(smplxPoseTransKey)){
+            float[] values = smplxData[smplxPoseTransKey].ToObject<float[]>();
+            smplxPoseTrans = new Vector3(values[0], values[1], values[2]);
         }
     }
 
@@ -392,6 +405,9 @@ public class HumanGaussianInference : MonoBehaviour
             tensor.Dispose();
         }
         m_InputTensors.Clear();
+
+        m_GpuPosData?.Release();
+        m_GpuPosData = null;
 
         worker?.Dispose();
     }

@@ -1,12 +1,16 @@
 #pragma kernel CSMain
 
 // --- 輸入 ---
-StructuredBuffer<float> _SourcePos; // 位置數據 (mean_3d_refined)
+StructuredBuffer<float> _SourcePos; // 原始位置數據 (mean_3d)
+StructuredBuffer<float> _SkinningWeights; // 蒙皮權重 [SplatCount * JointCount]
+StructuredBuffer<float4x4> _SkinningMatrices; // 最終的變換矩陣 (final_transform_mat) [JointCount]
 
 // --- 輸出 ---
-RWStructuredBuffer<float> _DestinationPos; // splat 的位置緩衝區
+RWStructuredBuffer<float> _DestinationPos; // 變形後的 splat 位置緩衝區
 
+// --- 參數 ---
 uint _SplatCount; // splat 的總數
+uint _JointCount; // 關節的總數 (通常是 55)
 
 [numthreads(1024, 1, 1)]
 void CSMain(uint3 id : SV_DispatchThreadID)
@@ -17,10 +21,37 @@ void CSMain(uint3 id : SV_DispatchThreadID)
         return;
     }
 
-    uint base_idx = id.x * 3;
+    // --- 1. 初始化並讀取源數據 ---
+    float3 finalPos = float3(0.0f, 0.0f, 0.0f);
+    uint sourcePosBaseIdx = id.x * 3;
+    
+    // 從 Buffer 讀取 mean_3d 的原始位置
+    float3 sourcePos = float3(_SourcePos[sourcePosBaseIdx + 0], _SourcePos[sourcePosBaseIdx + 1], _SourcePos[sourcePosBaseIdx + 2]);
+    float4 sourcePosH = float4(sourcePos, 1.0f); // 轉換為齊次座標
 
-    // --- 1. 處理位置數據 ---
-    _DestinationPos[base_idx + 0] = -_SourcePos[base_idx + 0];
-    _DestinationPos[base_idx + 1] = _SourcePos[base_idx + 1];
-    _DestinationPos[base_idx + 2] = _SourcePos[base_idx + 2];
+    // --- 2. 執行 LBS 計算 ---
+    // 遍歷所有關節，進行加權求和
+    uint weightBaseIdx = id.x * _JointCount;
+    for (uint j = 0; j < _JointCount; ++j)
+    {
+        // 讀取當前 splat 對於關節 j 的權重
+        float weight = _SkinningWeights[weightBaseIdx + j];
+
+        // 優化：如果權重過小，則跳過計算
+        if (weight > 0.0001f)
+        {
+            // 讀取關節 j 的最終變換矩陣
+            float4x4 mat = _SkinningMatrices[j];
+            
+            // 將原始頂點位置應用矩陣變換，並乘以權重
+            finalPos += mul(mat, sourcePosH).xyz * weight;
+        }
+    }
+
+    // --- 3. 寫入目標緩衝區並進行座標系轉換 ---
+    // 將計算出的最終位置寫入目標 Buffer
+    uint destPosBaseIdx = id.x * 3;
+    _DestinationPos[destPosBaseIdx + 0] = finalPos.x;
+    _DestinationPos[destPosBaseIdx + 1] = finalPos.y;
+    _DestinationPos[destPosBaseIdx + 2] = finalPos.z;
 }
