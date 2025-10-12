@@ -758,6 +758,7 @@ MonoBehaviour:
   jointColor: {r: 0, g: 1, b: 0, a: 1}
   jointRadius: 0.01
   boneColor: {r: 1, g: 1, b: 1, a: 1}
+  LBSComputeShader: {fileID: 7200000, guid: 961ec0e25ffebb940a4da7a272032cf5, type: 3}
 --- !u!1 &1809080840
 GameObject:
   m_ObjectHideFlags: 0

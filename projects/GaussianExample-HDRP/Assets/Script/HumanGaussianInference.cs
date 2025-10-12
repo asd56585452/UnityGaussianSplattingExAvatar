@@ -33,6 +33,7 @@ public class HumanGaussianInference : MonoBehaviour
 
     // --- 新增： Tensor 屬性，用於儲存最新的位置資料 ---
     private Tensor<float> PosOutputTensor;
+    public uint splatCount = 0;
     private Tensor<float> RGBOutputTensor;
     private Tensor<float> ScaleOutputTensor;
     // --- 新增： Tensor 屬性，用於儲存最新的JointPOS資料 ---
@@ -40,11 +41,14 @@ public class HumanGaussianInference : MonoBehaviour
     public Tensor<int> ParentsTensor;
     public Tensor<float> TransformMatNeutralPoseTensor;
     public List<float> smplxPose;
+    public Tensor<float> SkinningWeightTensor;
 
     // 用於儲存 m_GpuOtherData 的初始狀態（包含旋轉和縮放）
     private byte[] m_InitialOtherData;
     // 快取 GPU 緩衝區的引用
     private GraphicsBuffer m_GpuOtherDataRef;
+    //
+    public GraphicsBuffer m_GpuPosData;
 
     private Dictionary<string, Tensor<float>> m_InputTensors = new Dictionary<string, Tensor<float>>();
 
@@ -147,6 +151,9 @@ public class HumanGaussianInference : MonoBehaviour
         {
             Debug.LogError("無法從 GaussianSplatRenderer 獲取 'Other' 數據緩衝區。");
         }
+        //初始化未變形GpuPosData
+        var sourceBuffer = gaussianSplatRenderer.GetGpuPosData();
+        m_GpuPosData = new GraphicsBuffer(sourceBuffer.target, sourceBuffer.count, sourceBuffer.stride);
     }
 
     void OnDisable()
@@ -158,62 +165,78 @@ public class HumanGaussianInference : MonoBehaviour
     void Update()
     {
         // --- 從 JSON 檔案載入輸入資料 ---
-        LoadInputsForFrame(frameIndex,false);
+        LoadInputsForFrame(frameIndex, false);
 
-        // --- 執行推論 ---
-        //worker.Schedule();
-        Graphics.ExecuteCommandBuffer(cb);
-
-        // --- 更新公開的 Tensor 屬性 ---
-        PosOutputTensor = worker.PeekOutput("mean_3d_refined") as Tensor<float>;
-        RGBOutputTensor = worker.PeekOutput("rgb") as Tensor<float>;
-        ScaleOutputTensor = worker.PeekOutput("scale_refined") as Tensor<float>;
-        if (cpuCopy)
+        // --- 為每一幀重建 CommandBuffer ---
+        // 建立一個臨時的 CommandBuffer 或清除舊的
+        // 使用 CommandBufferPool 會更有效率，但為了簡單起見，我們先 new 一個
+        using (CommandBuffer cmd = new CommandBuffer())
         {
-            var dataSpan = PosOutputTensor.DownloadToArray();
-            gaussianSplatRenderer.UpdateSplatPositions(dataSpan);
-            var colorSpan = RGBOutputTensor.DownloadToArray();
-            float[] textureFloatData = ConvertColorsToFloatTexture(colorSpan);
-            gaussianSplatRenderer.UpdateSplatColors(textureFloatData);
-            var scaleSpan = ScaleOutputTensor.DownloadToArray();
-            byte[] updatedOtherData = PrepareOtherData(scaleSpan);
-            gaussianSplatRenderer.UpdateGpuOtherData(updatedOtherData);
-        }
-        else
-        {
-            // --- 合併後的 GPU 複製操作 ---
-            var posComputeTensorData = ComputeTensorData.Pin(PosOutputTensor);
-            var rgbComputeTensorData = ComputeTensorData.Pin(RGBOutputTensor);
-            var scaleComputeTensorData = ComputeTensorData.Pin(ScaleOutputTensor);
+            cmd.name = "Human Gaussian Inference";
 
-            var posSourceBuffer = posComputeTensorData.buffer;
-            var rgbSourceBuffer = rgbComputeTensorData.buffer;
-            var scaleSourceBuffer = scaleComputeTensorData.buffer;
+            // 1. 將 ONNX Worker 加入 Buffer
+            cmd.ScheduleWorker(worker);
 
-            var posDestinationBuffer = gaussianSplatRenderer.GetGpuPosData();
-            var otherDestinationBuffer = gaussianSplatRenderer.GetGpuOtherData();
-            var rgbDestinationTexture = gaussianSplatRenderer.GetGpuColorData();
+            // --- 更新公開的 Tensor 屬性 ---
+            PosOutputTensor = worker.PeekOutput("mean_3d_refined") as Tensor<float>;
+            RGBOutputTensor = worker.PeekOutput("rgb") as Tensor<float>;
+            ScaleOutputTensor = worker.PeekOutput("scale_refined") as Tensor<float>;
+            SkinningWeightTensor = worker.PeekOutput("skinning_weight") as Tensor<float>;
 
-            uint splatCount = (uint)PosOutputTensor.shape.length / 3;
-
-            if (posDestinationBuffer == null || rgbDestinationTexture == null || otherDestinationBuffer == null)
+            if (cpuCopy)
             {
-                Debug.LogError("一個或多個目標緩衝區為空！");
-                return;
+                // 如果是 CPU 複製，需要等待 GPU 完成
+                Graphics.ExecuteCommandBuffer(cmd);
+                //worker.Sync(); // 確保 worker 完成
+
+                var dataSpan = PosOutputTensor.DownloadToArray();
+                gaussianSplatRenderer.UpdateSplatPositions(dataSpan);
+                var colorSpan = RGBOutputTensor.DownloadToArray();
+                float[] textureFloatData = ConvertColorsToFloatTexture(colorSpan);
+                gaussianSplatRenderer.UpdateSplatColors(textureFloatData);
+                var scaleSpan = ScaleOutputTensor.DownloadToArray();
+                byte[] updatedOtherData = PrepareOtherData(scaleSpan);
+                gaussianSplatRenderer.UpdateGpuOtherData(updatedOtherData);
             }
+            else
+            {
+                // --- GPU 複製操作 ---
+                var posComputeTensorData = ComputeTensorData.Pin(PosOutputTensor);
+                var rgbComputeTensorData = ComputeTensorData.Pin(RGBOutputTensor);
+                var scaleComputeTensorData = ComputeTensorData.Pin(ScaleOutputTensor);
 
-            // --- 為單一核心設置所有資源 ---
-            tensorCopyShader.SetBuffer(m_TensorCopyKernel, "_SourcePos", posSourceBuffer);
-            tensorCopyShader.SetBuffer(m_TensorCopyKernel, "_SourceRGB", rgbSourceBuffer);
-            tensorCopyShader.SetBuffer(m_TensorCopyKernel, "_SourceScale", scaleSourceBuffer);
-            tensorCopyShader.SetBuffer(m_TensorCopyKernel, "_DestinationPos", posDestinationBuffer);
-            tensorCopyShader.SetBuffer(m_TensorCopyKernel, "_DestinationOther", otherDestinationBuffer);
-            tensorCopyShader.SetTexture(m_TensorCopyKernel, "_DestinationRGB", rgbDestinationTexture);
-            tensorCopyShader.SetInt("_SplatCount", (int)splatCount);
+                var posSourceBuffer = posComputeTensorData.buffer;
+                var rgbSourceBuffer = rgbComputeTensorData.buffer;
+                var scaleSourceBuffer = scaleComputeTensorData.buffer;
 
-            // --- 執行一次 Dispatch ---
-            int threadGroups = ((int)splatCount + 1024) / 1024;
-            tensorCopyShader.Dispatch(m_TensorCopyKernel, threadGroups, 1, 1);
+                var otherDestinationBuffer = gaussianSplatRenderer.GetGpuOtherData();
+                var rgbDestinationTexture = gaussianSplatRenderer.GetGpuColorData();
+
+                splatCount = (uint)PosOutputTensor.shape.length / 3;
+
+                if (m_GpuPosData != null && rgbDestinationTexture != null && otherDestinationBuffer != null)
+                {
+                    // 2. 將 Compute Shader 的參數設定加入 Buffer
+                    cmd.SetComputeBufferParam(tensorCopyShader, m_TensorCopyKernel, "_SourcePos", posSourceBuffer);
+                    cmd.SetComputeBufferParam(tensorCopyShader, m_TensorCopyKernel, "_SourceRGB", rgbSourceBuffer);
+                    cmd.SetComputeBufferParam(tensorCopyShader, m_TensorCopyKernel, "_SourceScale", scaleSourceBuffer);
+                    cmd.SetComputeBufferParam(tensorCopyShader, m_TensorCopyKernel, "_DestinationPos", m_GpuPosData);
+                    cmd.SetComputeBufferParam(tensorCopyShader, m_TensorCopyKernel, "_DestinationOther", otherDestinationBuffer);
+                    cmd.SetComputeTextureParam(tensorCopyShader, m_TensorCopyKernel, "_DestinationRGB", rgbDestinationTexture);
+                    cmd.SetComputeIntParam(tensorCopyShader, "_SplatCount", (int)splatCount);
+
+                    // 3. 將 Dispatch 命令加入 Buffer
+                    int threadGroups = ((int)splatCount + 1023) / 1024; // 修正：常見的整數除法進位寫法
+                    cmd.DispatchCompute(tensorCopyShader, m_TensorCopyKernel, threadGroups, 1, 1);
+                }
+                else
+                {
+                    Debug.LogError("一個或多個目標緩衝區為空！");
+                }
+
+                // 4. 一次性執行所有命令 (ONNX 推理 + Compute Shader 複製)
+                Graphics.ExecuteCommandBuffer(cmd);
+            }
         }
     }
 

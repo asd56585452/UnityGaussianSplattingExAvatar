@@ -1,4 +1,5 @@
 using UnityEngine;
+using UnityEngine.Rendering; // CommandBuffer 需要這個 namespace
 
 public class SkeletonBuilder : MonoBehaviour
 {
@@ -31,6 +32,11 @@ public class SkeletonBuilder : MonoBehaviour
     // 用於儲存我們創建的所有關節 GameObject
     private GameObject[] joints;
 
+    //LBS compute shader
+    CommandBuffer cb;
+    public ComputeShader LBSComputeShader;
+    private int m_LBSComputeKernel;
+
     void OnEnable()
     {
         parentArray = humanGaussianInference.ParentsTensor.DownloadToArray();
@@ -38,6 +44,8 @@ public class SkeletonBuilder : MonoBehaviour
         tPoseLocalPositions = ConvertFloatToVector3Array(fPoseLocalPositions);
         float[] fTransformMatNeutralPose = humanGaussianInference.TransformMatNeutralPoseTensor.DownloadToArray();
         mTransformMatNeutralPose = ConvertFloatToMatrix4x4(fTransformMatNeutralPose);
+
+        m_LBSComputeKernel = LBSComputeShader.FindKernel("CSMain");
     }
 
     void Start()
@@ -50,6 +58,19 @@ public class SkeletonBuilder : MonoBehaviour
     void Update()
     {
         SetPose();
+        LBSUpdate();
+    }
+
+    private void LBSUpdate()
+    {
+        var posDestinationBuffer = humanGaussianInference.gaussianSplatRenderer.GetGpuPosData();
+        LBSComputeShader.SetBuffer(m_LBSComputeKernel, "_SourcePos", humanGaussianInference.m_GpuPosData);
+        LBSComputeShader.SetBuffer(m_LBSComputeKernel, "_DestinationPos", posDestinationBuffer);
+
+        uint splatCount = humanGaussianInference.splatCount;
+        LBSComputeShader.SetInt("_SplatCount", (int)splatCount);
+        int threadGroups = ((int)splatCount + 1023) / 1024;
+        LBSComputeShader.Dispatch(m_LBSComputeKernel, threadGroups, 1, 1);
     }
 
     private void SetPose()
