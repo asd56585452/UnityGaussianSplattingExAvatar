@@ -1,0 +1,292 @@
+using UnityEngine;
+
+public class SkeletonBuilder : MonoBehaviour
+{
+    public HumanGaussianInference humanGaussianInference;
+
+    [Header("骨架數據")]
+    [Tooltip("父節點索引陣列。例如 parentArray[i] = j 代表第 i 個節點的父節點是第 j 個節點。根節點的父節點應為 -1。")]
+    public int[] parentArray;
+
+    [Tooltip("T-Pose 下各節點相對於其父節點的局部位置 (Local Position)。")]
+    public Vector3[] tPoseLocalPositions;
+    public Matrix4x4[] mTransformMatZeroPose;
+
+    [Tooltip("大-Pose TransformMat。")]
+    public Matrix4x4[] mTransformMatNeutralPose;
+
+    [Tooltip("大-Pose to Pose TransformMat。")]
+    public Matrix4x4[] skinningMatrix;
+
+    [Header("視覺化設定")]
+    [Tooltip("是否在編輯器中繪製骨架 Gizmos")]
+    public bool drawGizmos = true;
+    [Tooltip("節點 Gizmos 的顏色")]
+    public Color jointColor = Color.green;
+    [Tooltip("節點 Gizmos 的半徑大小")]
+    public float jointRadius = 0.05f;
+    [Tooltip("骨骼 Gizmos 的顏色")]
+    public Color boneColor = Color.white;
+
+    // 用於儲存我們創建的所有關節 GameObject
+    private GameObject[] joints;
+
+    void OnEnable()
+    {
+        parentArray = humanGaussianInference.ParentsTensor.DownloadToArray();
+        float[] fPoseLocalPositions = humanGaussianInference.JointZeroPoseTensor.DownloadToArray();
+        tPoseLocalPositions = ConvertFloatToVector3Array(fPoseLocalPositions);
+        float[] fTransformMatNeutralPose = humanGaussianInference.TransformMatNeutralPoseTensor.DownloadToArray();
+        mTransformMatNeutralPose = ConvertFloatToMatrix4x4(fTransformMatNeutralPose);
+    }
+
+    void Start()
+    {
+        // 呼叫建立骨架的函式
+        BuildSkeleton();
+        TransformToNeturalPose();
+    }
+
+    void Update()
+    {
+        SetPose();
+    }
+
+    private void SetPose()
+    {
+        int jointCount = joints.Length;
+        for (int i = 0; i < jointCount; i++)
+        {
+            float x = humanGaussianInference.smplxPose[i * 3 + 0];
+            float y = humanGaussianInference.smplxPose[i * 3 + 1];
+            float z = humanGaussianInference.smplxPose[i * 3 + 2];
+            Quaternion rootRot = QuatFromRodrigues(x, y, z);
+            joints[i].transform.localRotation = rootRot;
+        }
+        skinningMatrix = new Matrix4x4[jointCount];
+        for (int i = 0; i < jointCount; i++)
+        {
+            skinningMatrix[i] = joints[i].transform.localToWorldMatrix * mTransformMatZeroPose[i].inverse * mTransformMatNeutralPose[i];
+        }
+    }
+
+    public void TransformToNeturalPose()
+    {
+        int jointCount = joints.Length;
+        for (int i = 0; i < jointCount; i++)
+        {
+            Transform transform = joints[i].transform;
+            Matrix4x4 deltaMatrix = mTransformMatNeutralPose[i].inverse;
+            transform.rotation = deltaMatrix.rotation;
+        }
+    }
+
+    /// <summary>
+    /// 建立骨架的主要函式
+    /// </summary>
+    public void BuildSkeleton()
+    {
+        // 1. 基本的數據驗證
+        if (parentArray == null || tPoseLocalPositions == null || parentArray.Length != tPoseLocalPositions.Length)
+        {
+            Debug.LogError("骨架數據無效！請檢查 parentArray 和 tPoseLocalPositions 的長度是否一致且不為空。");
+            return;
+        }
+
+        int jointCount = parentArray.Length;
+        joints = new GameObject[jointCount];
+        mTransformMatZeroPose = new Matrix4x4[jointCount];
+
+        // --- 第一階段：創建所有關節物件並設定其局部位置 ---
+        // 我們需要先創建所有物件，才能在下一步中設定父子關係
+        for (int i = 0; i < jointCount; i++)
+        {
+            // 創建一個新的 GameObject 來代表關節
+            joints[i] = new GameObject("Joint_" + i);
+
+            // 設定此關節相對於其未來父節點的局部位置
+            // 注意：此時它的父節點是場景根目錄，所以 localPosition 和 world position 暫時是相同的
+            joints[i].transform.localPosition = tPoseLocalPositions[i];
+            mTransformMatZeroPose[i] = joints[i].transform.localToWorldMatrix;
+        }
+
+        // --- 第二階段：根據 parentArray 建立父子層級關係 ---
+        for (int i = 0; i < jointCount; i++)
+        {
+            int parentIndex = parentArray[i];
+
+            // 如果 parentIndex 是 -1，代表這是根節點 (root)，它沒有父節點
+            if (parentIndex == -1)
+            {
+                // 將根節點設置為 SkeletonManager 的子物件，方便管理
+                joints[i].transform.SetParent(this.transform, false);
+                continue;
+            }
+
+            // 進行安全檢查，確保父節點索引有效
+            if (parentIndex >= 0 && parentIndex < jointCount)
+            {
+                // 設定父子關係
+                // worldPositionStays: false 參數非常重要！
+                // 它確保在設定父節點後，物件的 localPosition 仍然是我們在第一階段設定的值。
+                joints[i].transform.SetParent(joints[parentIndex].transform, true);
+            }
+            else
+            {
+                Debug.LogWarning($"關節 {i} 的父節點索引 {parentIndex} 無效。");
+            }
+        }
+
+        Debug.Log("骨架建立完成！");
+    }
+
+    public Vector3[] ConvertFloatToVector3Array(float[] floats)
+    {
+        if (floats.Length % 3 != 0)
+        {
+            Debug.LogError("The length of the float array must be a multiple of 3.");
+            return null;
+        }
+
+        int vectorCount = floats.Length / 3;
+        Vector3[] vectorArray = new Vector3[vectorCount];
+
+        for (int i = 0; i < vectorCount; i++)
+        {
+            int floatIndex = i * 3;
+            vectorArray[i] = new Vector3(
+                -floats[floatIndex],// 座標系轉換: SMPL-X (右手系) -> Unity (左手系)
+                floats[floatIndex + 1],
+                floats[floatIndex + 2]
+            );
+        }
+
+        return vectorArray;
+    }
+
+    public Matrix4x4[] ConvertFloatToMatrix4x4(float[] floats)
+    {
+        if (floats.Length % 16 != 0)
+        {
+            Debug.LogError("The length of the float array must be a multiple of 16.");
+            return null;
+        }
+
+        int matrixCount = floats.Length / 16;
+        Matrix4x4[] matrixArray = new Matrix4x4[matrixCount];
+
+        for (int i = 0; i < matrixCount; i++)
+        {
+            int baseIndex = i * 16;
+            Matrix4x4 mat = new Matrix4x4();
+
+            mat.m00 = floats[baseIndex + 0];
+            mat.m01 = floats[baseIndex + 1];
+            mat.m02 = floats[baseIndex + 2];
+            mat.m03 = floats[baseIndex + 3];
+
+            // Column 1
+            mat.m10 = floats[baseIndex + 4];
+            mat.m11 = floats[baseIndex + 5];
+            mat.m12 = floats[baseIndex + 6];
+            mat.m13 = floats[baseIndex + 7];
+
+            // Column 2
+            mat.m20 = floats[baseIndex + 8];
+            mat.m21 = floats[baseIndex + 9];
+            mat.m22 = floats[baseIndex + 10];
+            mat.m23 = floats[baseIndex + 11];
+
+            // Column 3
+            mat.m30 = floats[baseIndex + 12];
+            mat.m31 = floats[baseIndex + 13];
+            mat.m32 = floats[baseIndex + 14];
+            mat.m33 = floats[baseIndex + 15];
+
+            // 座標系轉換: SMPL-X (右手系) -> Unity (左手系)
+            mat = ConvertRightHandedToLeftHandedMatrix(mat);
+
+            matrixArray[i] = mat;
+        }
+
+        return matrixArray;
+    }
+
+    /// <summary>
+    /// 將從 Python (右手系) 導出的 Matrix4x4 轉換為 Unity (左手系) 的 Matrix4x4
+    /// </summary>
+    public Matrix4x4 ConvertRightHandedToLeftHandedMatrix(Matrix4x4 rhMatrix)
+    {
+        // 1. 分解
+        Vector3 position = rhMatrix.GetPosition();
+        Quaternion rotation = rhMatrix.rotation;
+
+        // 2. 分別轉換
+        // 平移：X 軸取反
+        position.x = -position.x;
+
+        // 旋轉：X 和 W 分量取反
+        rotation.x = -rotation.x;
+        rotation.w = -rotation.w;
+
+        // 3. 重新組合 (Unity 的 TRS 方法會自動處理好左手系的矩陣構建)
+        Matrix4x4 lhMatrix = Matrix4x4.TRS(position, rotation, Vector3.one);
+
+        return lhMatrix;
+    }
+
+    /// <summary>
+    /// 將 SMPL-X 的軸角式向量轉換為 Unity 的 Quaternion
+    /// (從官方 SMPLX.cs 腳本中借鑒)
+    /// </summary>
+    public static Quaternion QuatFromRodrigues(float rodX, float rodY, float rodZ)
+    {
+        // 座標系轉換: SMPL-X (右手系) -> Unity (左手系)
+        Vector3 axis = new Vector3(-rodX, rodY, rodZ);
+        float angle_rad = axis.magnitude;
+
+        if (angle_rad < 1e-6) // 避免除以零
+        {
+            return Quaternion.identity;
+        }
+
+        float angle_deg = -angle_rad * Mathf.Rad2Deg;
+        Vector3 axis_normalized = axis / angle_rad;
+
+        return Quaternion.AngleAxis(angle_deg, axis_normalized);
+    }
+
+    /// <summary>
+    /// 在 Unity 編輯器的 Scene 視窗中繪製輔助線，方便觀察
+    /// </summary>
+    void OnDrawGizmos()
+    {
+        if (!drawGizmos || joints == null || joints.Length == 0)
+        {
+            return;
+        }
+
+        // 遍歷所有關節
+        for (int i = 0; i < joints.Length; i++)
+        {
+            if (joints[i] == null) continue;
+
+            Transform currentJoint = joints[i].transform;
+
+            // 繪製關節點 (球體)
+            Gizmos.color = jointColor;
+            Gizmos.DrawSphere(currentJoint.position, jointRadius);
+
+            // 繪製連接到父節點的骨骼 (線段)
+            int parentIndex = parentArray[i];
+            if (parentIndex != -1 && parentIndex >= 0 && parentIndex < joints.Length)
+            {
+                if (joints[parentIndex] == null) continue;
+
+                Transform parentJoint = joints[parentIndex].transform;
+                Gizmos.color = boneColor;
+                Gizmos.DrawLine(currentJoint.position, parentJoint.position);
+            }
+        }
+    }
+}

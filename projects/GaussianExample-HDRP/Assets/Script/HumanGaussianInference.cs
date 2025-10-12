@@ -35,6 +35,11 @@ public class HumanGaussianInference : MonoBehaviour
     private Tensor<float> PosOutputTensor;
     private Tensor<float> RGBOutputTensor;
     private Tensor<float> ScaleOutputTensor;
+    // --- 新增： Tensor 屬性，用於儲存最新的JointPOS資料 ---
+    public Tensor<float> JointZeroPoseTensor;
+    public Tensor<int> ParentsTensor;
+    public Tensor<float> TransformMatNeutralPoseTensor;
+    public List<float> smplxPose;
 
     // 用於儲存 m_GpuOtherData 的初始狀態（包含旋轉和縮放）
     private byte[] m_InitialOtherData;
@@ -49,6 +54,10 @@ public class HumanGaussianInference : MonoBehaviour
     };
     private readonly List<string> outputKeys = new List<string> {
         "mean_3d_refined", "rgb", "scale_refined"
+    };
+    private readonly List<string> smplxPosKeys = new List<string> {
+         "root_pose","body_pose", "jaw_pose", "leye_pose", "reye_pose",
+        "lhand_pose", "rhand_pose"
     };
 
     void OnEnable()
@@ -100,6 +109,22 @@ public class HumanGaussianInference : MonoBehaviour
         }
 
         InitializeGpuData();
+        InitializeJointPosData();
+    }
+
+    private void InitializeJointPosData()
+    {
+        // --- 從 JSON 檔案載入輸入資料 ---
+        LoadInputsForFrame(frameIndex, false);
+
+        // --- 執行推論 ---
+        //worker.Schedule();
+        Graphics.ExecuteCommandBuffer(cb);
+
+        // --- 更新公開的 Tensor 屬性 ---
+        JointZeroPoseTensor = worker.PeekOutput("joint_zero_pose") as Tensor<float>;
+        ParentsTensor = worker.PeekOutput("parents") as Tensor<int>;
+        TransformMatNeutralPoseTensor = worker.PeekOutput("transform_mat_neutral_pose") as Tensor<float>;
     }
 
     private void InitializeGpuData()
@@ -230,6 +255,17 @@ public class HumanGaussianInference : MonoBehaviour
                     Debug.LogWarning($"Key '{key}' 的資料長度在第 {frame} 幀發生改變，無法重複使用 Tensor。");
                     // 這裡可以選擇重新建立 Tensor 作為備用方案
                 }
+            }
+        }
+
+        smplxPose.Clear();
+
+        foreach (string key in smplxPosKeys)
+        {
+            if (smplxData.ContainsKey(key))
+            {
+                float[] values = smplxData[key].ToObject<float[]>();
+                smplxPose.AddRange(values);
             }
         }
     }

@@ -510,13 +510,13 @@ Transform:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 1462254335}
   serializedVersion: 2
-  m_LocalRotation: {x: 0.020998439, y: 0.0014996824, z: -0.000031501982, w: 0.9997784}
-  m_LocalPosition: {x: 0.07253727, y: -0.13307099, z: -2.230627}
+  m_LocalRotation: {x: 0, y: 0.99977964, z: -0.020994725, w: 0}
+  m_LocalPosition: {x: 0.07253727, y: -0.13307099, z: 2.230627}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
   m_Father: {fileID: 0}
-  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+  m_LocalEulerAnglesHint: {x: 2.406, y: 180, z: 0}
 --- !u!114 &1462254339
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -667,6 +667,7 @@ GameObject:
   - component: {fileID: 1609192435}
   - component: {fileID: 1609192434}
   - component: {fileID: 1609192436}
+  - component: {fileID: 1609192437}
   m_Layer: 0
   m_Name: GaussianSplats
   m_TagString: Untagged
@@ -711,7 +712,7 @@ Transform:
   serializedVersion: 2
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
   m_LocalPosition: {x: 0, y: 0, z: 0}
-  m_LocalScale: {x: 1, y: 1, z: -1}
+  m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
   m_Father: {fileID: 0}
@@ -728,12 +729,35 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 9124f2d24746a8b4babea675619726c1, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  modelAsset: {fileID: 5022602860645237092, guid: d6b3fb9d3db19634098cf767dabaa2c1, type: 3}
+  modelAsset: {fileID: 5022602860645237092, guid: 1b2064669e9994043b8c9c5911b041bc, type: 3}
   tensorCopyShader: {fileID: 7200000, guid: 619c078d4ffbe0047b73b20bfc8628ee, type: 3}
   cpuCopy: 0
   motionFolderName: smplx_params_smoothed
   frameIndex: 0
   gaussianSplatRenderer: {fileID: 1609192434}
+  smplxPose: []
+--- !u!114 &1609192437
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1609192433}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 5e090925e0ffe3d4685b267105bc1287, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  humanGaussianInference: {fileID: 1609192436}
+  parentArray: 
+  tPoseLocalPositions: []
+  mTransformMatZeroPose: []
+  mTransformMatNeutralPose: []
+  skinningMatrix: []
+  drawGizmos: 1
+  jointColor: {r: 0, g: 1, b: 0, a: 1}
+  jointRadius: 0.01
+  boneColor: {r: 1, g: 1, b: 1, a: 1}
 --- !u!1 &1809080840
 GameObject:
   m_ObjectHideFlags: 0
@@ -787,7 +811,7 @@ Transform:
   m_GameObject: {fileID: 1809080840}
   serializedVersion: 2
   m_LocalRotation: {x: -1, y: 0, z: 0, w: 0}
-  m_LocalPosition: {x: 0, y: -0.65, z: 0.51}
+  m_LocalPosition: {x: 0, y: -0.65, z: -1.9}
   m_LocalScale: {x: 1, y: 1, z: -1}
   m_ConstrainProportionsScale: 0
   m_Children: []
