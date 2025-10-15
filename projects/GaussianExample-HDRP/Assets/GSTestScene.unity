@@ -733,6 +733,8 @@ MonoBehaviour:
   tensorCopyShader: {fileID: 7200000, guid: 619c078d4ffbe0047b73b20bfc8628ee, type: 3}
   motionFolderName: smplx_params_smoothed
   frameIndex: 0
+  play: 0
+  playFps: 30
   gaussianSplatRenderer: {fileID: 1609192434}
   splatCount: 0
   smplxPose: []

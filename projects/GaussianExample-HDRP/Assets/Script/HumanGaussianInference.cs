@@ -29,6 +29,9 @@ public class HumanGaussianInference : MonoBehaviour
     public const int FrameIndexMax = 2065;
     [Range(0, FrameIndexMax)]
     public int frameIndex = 0;
+    public bool play=false;
+    public float playFps=5;
+    private float addPlayTime = 0;
 
     // --- 將 GaussianSplatRenderer 設為 public，以便從外部連結 ---
     public GaussianSplatRenderer gaussianSplatRenderer;
@@ -174,7 +177,19 @@ public class HumanGaussianInference : MonoBehaviour
     void Update()
     {
         // --- 從 JSON 檔案載入輸入資料 ---
-        LoadInputsForFrame(frameIndex, false);
+        if (play)
+        {
+            addPlayTime += Time.deltaTime;
+            frameIndex = (int) (addPlayTime * playFps);
+            if(frameIndex > FrameIndexMax)
+                frameIndex = FrameIndexMax;
+            LoadInputsForFrame(frameIndex, false);
+        }
+        else
+        {
+            addPlayTime = (float)frameIndex / playFps;
+            LoadInputsForFrame(frameIndex, false);
+        }
 
         // --- 為每一幀重建 CommandBuffer ---
         // 建立一個臨時的 CommandBuffer 或清除舊的
