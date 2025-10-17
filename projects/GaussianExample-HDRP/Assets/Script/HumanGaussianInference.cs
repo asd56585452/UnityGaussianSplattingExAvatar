@@ -31,6 +31,7 @@ public class HumanGaussianInference : MonoBehaviour
     public int frameIndex = 0;
     public bool play=false;
     public float playFps=5;
+    public float Fps = 0;
     private float addPlayTime = 0;
 
     // --- 將 GaussianSplatRenderer 設為 public，以便從外部連結 ---
@@ -176,6 +177,7 @@ public class HumanGaussianInference : MonoBehaviour
 
     void Update()
     {
+        Fps = 1 / Time.deltaTime;
         // --- 從 JSON 檔案載入輸入資料 ---
         if (play)
         {

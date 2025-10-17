@@ -127,7 +127,8 @@ public class SkeletonBuilder : MonoBehaviour
             joints[i].transform.localRotation = rootRot;
             if (parentArray[i]==-1)
             {
-                joints[i].transform.localPosition = humanGaussianInference.smplxPoseTrans;
+                Vector3 smplxPoseTrans = humanGaussianInference.smplxPoseTrans;
+                joints[i].transform.localPosition = new Vector3(-smplxPoseTrans.x, smplxPoseTrans.y, smplxPoseTrans.z);
             }
         }
     }
