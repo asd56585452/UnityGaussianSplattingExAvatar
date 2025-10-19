@@ -15,8 +15,15 @@ public class HumanGaussianInference : MonoBehaviour
     public static readonly List<HumanGaussianInference> Instances = new List<HumanGaussianInference>();
 
     public ModelAsset modelAsset;
+    public ModelAsset no_refine_modelAsset;
+    public ModelAsset refine_modelAsset;
+    public ModelAsset static_modelAsset;
     Model runtimeModel;
+    Model no_refine_runtimeModel;
+    Model refine_runtimeModel;
+    Model static_runtimeModel;
     Worker worker;
+    Worker static_worker;
     CommandBuffer cb;
 
     public ComputeShader tensorCopyShader;
@@ -49,6 +56,7 @@ public class HumanGaussianInference : MonoBehaviour
     public List<float> smplxPose;
     public Vector3 smplxPoseTrans;
     public bool refine = true;
+    private bool _refine = true;
     public Tensor<float> SkinningWeightTensor;
 
     // 用於儲存 m_GpuOtherData 的初始狀態（包含旋轉和縮放）
@@ -60,9 +68,12 @@ public class HumanGaussianInference : MonoBehaviour
 
     private Dictionary<string, Tensor<float>> m_InputTensors = new Dictionary<string, Tensor<float>>();
 
-    private readonly List<string> smplxKeys = new List<string> {
+    private readonly List<string> smplxKeysRefine = new List<string> {
          "body_pose", "jaw_pose", "leye_pose", "reye_pose",
         "lhand_pose", "rhand_pose", "expr"
+    };
+    private readonly List<string> smplxKeysNoRefine = new List<string> {
+         "expr"
     };
     private readonly List<string> outputKeys = new List<string> {
         "mean_3d_refined", "rgb", "scale_refined"
@@ -84,7 +95,9 @@ public class HumanGaussianInference : MonoBehaviour
         // 預先載入所有動畫資料
         PreloadAllMotionData();
 
-        runtimeModel = ModelLoader.Load(modelAsset);
+        refine_runtimeModel = ModelLoader.Load(refine_modelAsset);
+        no_refine_runtimeModel = ModelLoader.Load(no_refine_modelAsset);
+        static_runtimeModel = ModelLoader.Load(static_modelAsset);
 
         string firstFramePath = Path.Combine(Application.streamingAssetsPath, motionFolderName, "0.json");
         if (File.Exists(firstFramePath))
@@ -92,7 +105,7 @@ public class HumanGaussianInference : MonoBehaviour
             string smplxJsonContent = File.ReadAllText(firstFramePath);
             var smplxData = JsonConvert.DeserializeObject<Dictionary<string, JToken>>(smplxJsonContent);
 
-            foreach (string key in smplxKeys)
+            foreach (string key in smplxKeysRefine)
             {
                 if (smplxData.ContainsKey(key))
                 {
@@ -109,10 +122,10 @@ public class HumanGaussianInference : MonoBehaviour
             // 你也可以在這裡根據模型的已知輸入形狀手動建立 Tensors
         }
 
-        worker = new Worker(runtimeModel, BackendType.GPUCompute);
-        LoadInputsForFrame(0,true);
-        cb = new CommandBuffer();
-        cb.ScheduleWorker(worker);
+        static_worker = new Worker(static_runtimeModel, BackendType.GPUCompute);
+        //LoadInputsForFrame(0,true);
+        //cb = new CommandBuffer();
+        //cb.ScheduleWorker(static_worker);
         Debug.Log("ONNX Model loaded successfully.");
 
         if (tensorCopyShader != null)
@@ -126,22 +139,27 @@ public class HumanGaussianInference : MonoBehaviour
 
         InitializeGpuData();
         InitializeJointPosData();
+
+        worker = new Worker(refine_runtimeModel, BackendType.GPUCompute);
+        LoadInputsForFrame(0, true);
     }
+
 
     private void InitializeJointPosData()
     {
         // --- 從 JSON 檔案載入輸入資料 ---
-        LoadInputsForFrame(frameIndex, false);
+        //LoadInputsForFrame(frameIndex, false);
 
         // --- 執行推論 ---
-        //worker.Schedule();
-        Graphics.ExecuteCommandBuffer(cb);
+        static_worker.Schedule();
+        //Graphics.ExecuteCommandBuffer(cb);
 
         // --- 更新公開的 Tensor 屬性 ---
-        JointZeroPoseTensor = worker.PeekOutput("joint_zero_pose") as Tensor<float>;
-        ParentsTensor = worker.PeekOutput("parents") as Tensor<int>;
-        TransformMatNeutralPoseTensor = worker.PeekOutput("transform_mat_neutral_pose") as Tensor<float>;
-        SkinningWeightTensor = worker.PeekOutput("skinning_weight") as Tensor<float>;
+        RGBOutputTensor = static_worker.PeekOutput("rgb") as Tensor<float>;
+        JointZeroPoseTensor = static_worker.PeekOutput("joint_zero_pose") as Tensor<float>;
+        ParentsTensor = static_worker.PeekOutput("parents") as Tensor<int>;
+        TransformMatNeutralPoseTensor = static_worker.PeekOutput("transform_mat_neutral_pose") as Tensor<float>;
+        SkinningWeightTensor = static_worker.PeekOutput("skinning_weight") as Tensor<float>;
     }
 
     private void InitializeGpuData()
@@ -177,6 +195,23 @@ public class HumanGaussianInference : MonoBehaviour
 
     void Update()
     {
+        if (refine != _refine)
+        {
+            _refine = refine;
+            if (refine)
+            {
+                worker?.Dispose();
+                worker = new Worker(refine_runtimeModel, BackendType.GPUCompute);
+                LoadInputsForFrame(0, true);
+            }
+            else
+            {
+                worker?.Dispose();
+                worker = new Worker(no_refine_runtimeModel, BackendType.GPUCompute);
+                LoadInputsForFrame(0, true);
+            }
+        }
+        
         Fps = 1 / Time.deltaTime;
         // --- 從 JSON 檔案載入輸入資料 ---
         if (play)
@@ -207,13 +242,13 @@ public class HumanGaussianInference : MonoBehaviour
             if (refine)
             {
                 PosOutputTensor = worker.PeekOutput("mean_3d_refined") as Tensor<float>;
-                RGBOutputTensor = worker.PeekOutput("rgb") as Tensor<float>;
+                //RGBOutputTensor = worker.PeekOutput("rgb") as Tensor<float>;
                 ScaleOutputTensor = worker.PeekOutput("scale_refined") as Tensor<float>;
             }
             else
             {
                 PosOutputTensor = worker.PeekOutput("mean_3d") as Tensor<float>;
-                RGBOutputTensor = worker.PeekOutput("rgb") as Tensor<float>;
+                //RGBOutputTensor = worker.PeekOutput("rgb") as Tensor<float>;
                 ScaleOutputTensor = worker.PeekOutput("scale") as Tensor<float>;
             }
             
@@ -279,7 +314,15 @@ public class HumanGaussianInference : MonoBehaviour
     void LoadInputsForFrame(int frame,bool SetInput)
     {
         Dictionary<string, JToken> smplxData = m_AllFramesData[frame];
-
+        List<string> smplxKeys;
+        if (refine)
+        {
+            smplxKeys = smplxKeysRefine;
+        }
+        else
+        {
+            smplxKeys = smplxKeysNoRefine;
+        }
         foreach (string key in smplxKeys)
         {
             if (smplxData.ContainsKey(key) && m_InputTensors.ContainsKey(key))
@@ -427,5 +470,6 @@ public class HumanGaussianInference : MonoBehaviour
         m_GpuPosData = null;
 
         worker?.Dispose();
+        static_worker?.Dispose();
     }
 }

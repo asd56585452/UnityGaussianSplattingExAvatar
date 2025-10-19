@@ -730,11 +730,15 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   modelAsset: {fileID: 5022602860645237092, guid: 1b2064669e9994043b8c9c5911b041bc, type: 3}
+  no_refine_modelAsset: {fileID: 5022602860645237092, guid: 731ba53b56502ab4881363d2191c11e3, type: 3}
+  refine_modelAsset: {fileID: 5022602860645237092, guid: eb2e87ce0faef52428e088f386ebde95, type: 3}
+  static_modelAsset: {fileID: 5022602860645237092, guid: 13b95c2752447b741954cc002c4a8300, type: 3}
   tensorCopyShader: {fileID: 7200000, guid: 619c078d4ffbe0047b73b20bfc8628ee, type: 3}
   motionFolderName: smplx_params_smoothed
   frameIndex: 0
   play: 0
   playFps: 30
+  Fps: 0
   gaussianSplatRenderer: {fileID: 1609192434}
   splatCount: 0
   smplxPose: []
