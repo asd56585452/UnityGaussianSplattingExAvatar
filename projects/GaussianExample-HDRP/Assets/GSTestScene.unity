@@ -688,7 +688,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   m_Asset: {fileID: 11400000, guid: 251fc2fe2c06d464cb9f1656f06926c2, type: 2}
-  m_RenderOrder: 0
+  m_RenderOrder: 5
   m_SplatScale: 1
   m_OpacityScale: 1
   m_SHOrder: 3
@@ -710,13 +710,13 @@ Transform:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 1609192433}
   serializedVersion: 2
-  m_LocalRotation: {x: -1, y: 0, z: 0, w: 0}
-  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalRotation: {x: -0.90143627, y: -0, z: -0.43291178, w: 0}
+  m_LocalPosition: {x: 0.257, y: 0, z: -0.521}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
   m_Father: {fileID: 0}
-  m_LocalEulerAnglesHint: {x: -180, y: 0, z: 0}
+  m_LocalEulerAnglesHint: {x: -180, y: -51.304993, z: 0}
 --- !u!114 &1609192436
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -779,7 +779,7 @@ GameObject:
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
-  m_IsActive: 0
+  m_IsActive: 1
 --- !u!114 &1809080841
 MonoBehaviour:
   m_ObjectHideFlags: 0
