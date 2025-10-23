@@ -58,6 +58,28 @@ locations.
 The rendering takes game object transformation matrix into account; the official gaussian splat models seem to be all rotated by about
 -160 degrees around X axis, and mirrored around Z axis, so in the sample scene the object has such a transform set up.
 
+## ExAvatar Integration (HDRP Project)
+
+在 `projects/GaussianExample-HDRP` 中，額外增加了 ExAvatar 推論的功能：
+1.  **實現了 ExAvatar 在 Unity 上的推論**：透過 ONNX Runtime 執行 ExAvatar 的 MLP 模型，實現動態高斯人物渲染。
+2.  **多物件渲染範例**：場景中的物件 `GaussianSplats(1~3)` 是 `GaussianSplats` 的複製，用於展示同時渲染多個人物的情況。主要邏輯集中在 `GaussianSplats` 物件上。
+3.  **多物件遮擋**：修改了 `GaussianSplatRender` 的渲染順序，允許多個 GS 物件之間進行正確的深度遮擋。
+4.  **資產準備**：
+    * `GaussianSplatRender` 組件需要指定一個 `.asset` 檔案 (`Assets/GaussianAssets/output_onnx.asset`)。
+    * 此 `.asset` 檔案是透過這 Unity 專案內的工具 (`Tools -> Gaussian Splats -> Create GaussianSplatAsset`) 從 `Assets/StreamingAssets/output_onnx.ply` 檔案以最高品質轉換而來，代表 ExAvatar 人體模型的 **Neutral Pose** 狀態。
+5.  **ExAvatar 推論腳本** (`Assets/Script/HumanGaussianInference.cs`)：
+    * 此腳本負責執行 ExAvatar 的 MLP 部分。
+    * 需要指定四種 ONNX MLP 模型 (`human_model_ChunkedGroupNorm_lbs.onnx`, `human_model_ChunkedGroupNorm_lbs_refine.onnx`, `human_model_ChunkedGroupNorm_no_refine.onnx`, `human_model_ChunkedGroupNorm_lbs_static.onnx`)，這些是從 ExAvatar 原始模型導出的 ONNX 格式。
+    * **動畫控制**：
+        * `motionFolderName` 指定了動畫數據所在的資料夾，位於 `Assets/StreamingAssets/{motionFolderName}` (目前為 `smplx_params_smoothed`)。
+        * 此資料夾包含多個 `.json` 檔案，每個檔案代表一幀的 SMPL-X pose 和 expression 參數。
+        * `Refine` 選項決定是否啟用 ExAvatar 的 Refine 模式。關閉可提升效能，開啟則品質較高。
+        * `Frame Index` 和 `Play` 選項決定撥放進度和是否撥放(目前播放長度是寫死的)
+6.  **骨架與 LBS 變形腳本** (`Assets/Script/SkeletonBuilder.cs`)：
+    * 此腳本用於在執行階段生成骨架並應用 Linear Blend Skinning (LBS) 變形。
+    * 執行遊戲後才會看到生成的骨架。
+    * 取消勾選 `Set POSE` 後，可以手動調整骨架關節的位置和旋轉。
+
 Additional documentation:
 
 * [Render Pipeline Integration](/docs/render-pipeline-integration.md)
